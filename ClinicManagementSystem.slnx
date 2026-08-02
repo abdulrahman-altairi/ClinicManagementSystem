@@ -1,1 +1,16 @@
-<Solution />
+<Solution>
+  <Folder Name="/database/">
+    <File Path="database/SqlQuery_1.sql" />
+  </Folder>
+  <Folder Name="/src/" />
+  <Folder Name="/src/Core/">
+    <Project Path="src/Core/ClinicManagementSystem.Application/ClinicManagementSystem.Application.csproj" />
+    <Project Path="src/Core/ClinicManagementSystem.Core/ClinicManagementSystem.Domain.csproj" />
+  </Folder>
+  <Folder Name="/src/Infrastructure/">
+    <Project Path="src/Infrastructure/ClinicManagementSystem.Infrastructure/ClinicManagementSystem.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/src/Presentation/">
+    <Project Path="src/Presentation/ClinicManagementSystem.API/ClinicManagementSystem.API.csproj" />
+  </Folder>
+</Solution>
