@@ -1,6 +1,6 @@
 ﻿namespace ClinicManagementSystem.Domain.Enums;
 
-public enum AuthErrorCode
+public enum ErrorCode
 {
     // ── Generic ───────────────────────────────────────────────────────────────
     Unknown = 0,
@@ -39,8 +39,36 @@ public enum AuthErrorCode
     InsufficientPermissions = 6000,
     RoleNotFound = 6001,
     PermissionNotFound = 6002,
+    RoleAlreadyExists = 6003,
+    InvalidRoleId = 6004,
+    SystemRoleProtected = 6005,
+    RoleInUse = 6006,
+    InvalidPermissionId = 6007,
+    PermissionAlreadyExists = 6008,
+    InvalidPermissionCodeFormat = 6009,
+    SystemPermissionProtected = 6010,
+    PermissionInUse = 6011,
+    RolePermissionAlreadyExists = 6012,
+    RolePermissionNotFound = 6013,
+    CannotModifySystemRolePermissions = 6014,
+    EmptyPermissionList = 6015,
+    UserRoleAlreadyExists = 6016,
+    UserRoleNotFound = 6017,
+    InvalidRoleValidityPeriod = 6018,
+    CannotRemoveLastAdminRole = 6019,
+    EmptyRoleList = 6020,
+    UserPermissionAlreadyExists = 6021,
+    UserPermissionNotFound = 6022,
+    InvalidGrantType = 6023,
+    InvalidOverrideValidityPeriod = 6024,
+    EmptyOverrideList = 6025,
 
     // ── Two-Factor Authentication (2FA) ──────────────────────────────────────
     RequiresTwoFactor = 7000,
     InvalidTwoFactorCode = 7001,
+
+    // ── Empty or Invalid ──────────────────────────────────────-─────────-──────
+    InvalidUserId = 8000,
+    UserNotFound = 8001,
+
 }

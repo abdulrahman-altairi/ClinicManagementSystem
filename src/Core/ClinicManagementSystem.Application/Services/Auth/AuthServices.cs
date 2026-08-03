@@ -3,6 +3,7 @@ using ClinicManagementSystem.Application.Common.Interfaces;
 using ClinicManagementSystem.Application.Common.Models;
 using ClinicManagementSystem.Application.Common.Options;
 using ClinicManagementSystem.Application.DTOs.Auth.Sessions;
+using ClinicManagementSystem.Application.DTOs.Auth.UserRole;
 using ClinicManagementSystem.Application.DTOs.Auth.Users;
 using ClinicManagementSystem.Application.Interfaces.Repositories;
 using ClinicManagementSystem.Application.Interfaces.Services.Auth;
@@ -10,7 +11,7 @@ using ClinicManagementSystem.Domain.Entities.Auth;
 using FluentValidation;
 using Microsoft.Extensions.Logging;
 
-namespace ClinicManagementSystem.Application.Services;
+namespace ClinicManagementSystem.Application.Services.Auth;
 
 public sealed class AuthServices : IAuthServices
 {
@@ -93,23 +94,33 @@ public sealed class AuthServices : IAuthServices
         };
 
 
-        await _uow.ExecuteInTransactionAsync(
 
-            async () =>
+        await _uow.ExecuteInTransactionAsync(async () =>
+        {
+            await _repo.CreateUserAsync(user, ct);
+
+            if (!string.IsNullOrWhiteSpace(requestDto.RoleName))
             {
-                await _repo.CreateUserAsync(user, ct);
+                var role = await _repo.GetRoleByNameAsync(requestDto.RoleName.Trim(), ct);
 
-                if (!string.IsNullOrWhiteSpace(requestDto.RoleName))
+                if (role is not null)
                 {
-                    await _repo.AssignRolesToUserAsync(user.Id,
-                        new[] { new DTOs.Auth.UserAssignments.RoleAssignmentItemDto { RoleName = requestDto.RoleName } },
-                        user.Id, ct);
-                };
+                    var roleAssignments = new List<UserRoleAssignmentDto>
+            {
+                new UserRoleAssignmentDto
+                {
+                    RoleId = role.RoleId,
+                    ValidFrom = DateTimeOffset.UtcNow,
+                    ValidTo = null 
+                }
+            };
 
-                await _repo.TrackPasswordHistoryAsync(user.Id, hash, _currentUser.IpAddress, ct);
+                    await _repo.AssignRolesToUserAsync(user.Id, roleAssignments, user.Id, ct);
+                }
             }
 
-            , ct);
+            await _repo.TrackPasswordHistoryAsync(user.Id, hash, _currentUser.IpAddress, ct);
+        }, ct);
 
         _logger.LogInformation("New user registered: {UserId} ({Email})", user.Id, user.Email);
 
