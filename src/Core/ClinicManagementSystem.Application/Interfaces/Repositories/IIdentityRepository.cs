@@ -1,5 +1,6 @@
 ﻿using ClinicManagementSystem.Application.DTOs.Auth.Permissions;
 using ClinicManagementSystem.Application.DTOs.Auth.Role;
+using ClinicManagementSystem.Application.DTOs.Auth.Sessions;
 using ClinicManagementSystem.Application.DTOs.Auth.UserPermissions;
 using ClinicManagementSystem.Application.DTOs.Auth.UserRole;
 using ClinicManagementSystem.Domain.Entities.Auth;
@@ -27,6 +28,7 @@ public interface IIdentityRepository
     Task<UserSession?> GetSessionByRefreshTokenAsync(string refreshToken, CancellationToken ct = default);
     Task RevokeSessionAsync(Guid sessionId, string? replacedByToken, DateTimeOffset revokedAt, CancellationToken ct = default);
     Task RevokeAllUserSessionsAsync(Guid userId, DateTimeOffset revokedAt, CancellationToken ct = default);
+    Task<IReadOnlyList<UserSessionResponseDto>> GetActiveSessionsByUserIdAsync(Guid userId, CancellationToken ct = default);
     Task SaveEmailOtpAsync(Guid userId, string otpCode, DateTimeOffset expiresAt, CancellationToken ct = default);
     Task<bool> ValidateAndConsumeEmailOtpAsync(Guid userId, string otpCode, DateTimeOffset currentTime, CancellationToken ct = default);
 
