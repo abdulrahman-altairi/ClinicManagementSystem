@@ -84,4 +84,11 @@ public static class AuthErrors
     public static readonly ErrorModel PasswordReused = ErrorModel.Global(
         "You cannot reuse any of your recent passwords.",
         ErrorCode.PasswordReused.ToString());
+
+
+    // ── User Errors ─────────────────────────────────────────────────────────
+
+    public static readonly ErrorModel UserNotFound = ErrorModel.Global(
+        "User not found.",
+        ErrorCode.UserNotFound.ToString());
 }

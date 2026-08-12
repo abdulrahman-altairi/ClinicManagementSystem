@@ -2,6 +2,7 @@
 using ClinicManagementSystem.Application.Common.Interfaces;
 using ClinicManagementSystem.Application.Common.Models;
 using ClinicManagementSystem.Application.DTOs.Auth.UserPermissions;
+using ClinicManagementSystem.Domain.Entities.Auth;
 using ClinicManagementSystem.Application.Interfaces.Repositories;
 using ClinicManagementSystem.Application.Interfaces.Services.Auth;
 using FluentValidation;
@@ -14,6 +15,8 @@ public sealed class UserPermissionService : IUserPermissionService
     private readonly IIdentityRepository _repo;
     private readonly ILogger<UserPermissionService> _logger;
     private readonly IUnitOfWork _uow;
+    private readonly IDateTimeProvider _date;
+    private readonly ICurrentUserService _currentUser;
     private readonly IValidator<AddUserPermissionOverrideRequestDto> _addOverrideValidator;
     private readonly IValidator<UpdateUserPermissionOverrideRequestDto> _updateOverrideValidator;
     private readonly IValidator<SetUserPermissionsBulkRequestDto> _bulkOverrideValidator;
@@ -22,6 +25,8 @@ public sealed class UserPermissionService : IUserPermissionService
         IIdentityRepository repo,
         ILogger<UserPermissionService> logger,
         IUnitOfWork uow,
+        IDateTimeProvider date,
+        ICurrentUserService currentUser,
         IValidator<AddUserPermissionOverrideRequestDto> addOverrideValidator,
         IValidator<UpdateUserPermissionOverrideRequestDto> updateOverrideValidator,
         IValidator<SetUserPermissionsBulkRequestDto> bulkOverrideValidator)
@@ -29,6 +34,8 @@ public sealed class UserPermissionService : IUserPermissionService
         _repo = repo;
         _logger = logger;
         _uow = uow;
+        _date = date;
+        _currentUser = currentUser;
         _addOverrideValidator = addOverrideValidator;
         _updateOverrideValidator = updateOverrideValidator;
         _bulkOverrideValidator = bulkOverrideValidator;
@@ -63,7 +70,7 @@ public sealed class UserPermissionService : IUserPermissionService
         return ApiResponse<UserPermissionOverridesDetailsResponseDto>.Success(response, "User permission overrides retrieved successfully.");
     }
 
-    public async Task<ApiResponse<Guid>> AddUserPermissionOverrideAsync(AddUserPermissionOverrideRequestDto requestDto, Guid? grantedBy = null, CancellationToken ct = default)
+    public async Task<ApiResponse<Guid>> AddUserPermissionOverrideAsync(AddUserPermissionOverrideRequestDto requestDto, CancellationToken ct = default)
     {
         var validation = await _addOverrideValidator.ValidateAsync(requestDto, ct);
         if (!validation.IsValid)
@@ -98,28 +105,27 @@ public sealed class UserPermissionService : IUserPermissionService
                 UserPermissionErrors.UserPermissionAlreadyExists);
         }
 
-        var userPermissionId = Guid.NewGuid();
-        var validFrom = requestDto.ValidFrom ?? DateTimeOffset.UtcNow;
-
-        await _uow.ExecuteInTransactionAsync(async () =>
+        var userPermission = new UserPermission
         {
-            await _repo.CreateUserPermissionOverrideAsync(
-                userPermissionId,
-                requestDto.UserId,
-                requestDto.PermissionId,
-                grantTypeString,
-                requestDto.Reason?.Trim(),
-                validFrom,
-                requestDto.ValidTo,
-                grantedBy,
-                ct);
-        }, ct);
+            Id = Guid.NewGuid(),
+            UserId = requestDto.UserId,
+            PermissionId = requestDto.PermissionId,
+            GrantType = requestDto.GrantType,
+            Reason = requestDto.Reason?.Trim(),
+            ValidFrom = requestDto.ValidFrom ?? _date.UtcNow,
+            ValidTo = requestDto.ValidTo,
+            CreatedBy = _currentUser.UserId,
+            CreatedAt = _date.UtcNow
+        };
+
+
+        await _repo.CreateUserPermissionOverrideAsync(userPermission, ct);
 
         _logger.LogInformation("Permission override '{GrantType}' created for User '{UserId}' on Permission '{PermissionId}'.", grantTypeString, requestDto.UserId, requestDto.PermissionId);
-        return ApiResponse<Guid>.Success(userPermissionId, "User permission override added successfully.");
+        return ApiResponse<Guid>.Success(userPermission.Id, "User permission override added successfully.");
     }
 
-    public async Task<ApiResponse<bool>> UpdateUserPermissionOverrideAsync(Guid userPermissionId, UpdateUserPermissionOverrideRequestDto requestDto, Guid? updatedBy = null, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> UpdateUserPermissionOverrideAsync(Guid userPermissionId, UpdateUserPermissionOverrideRequestDto requestDto, CancellationToken ct = default)
     {
         if (userPermissionId == Guid.Empty)
         {
@@ -147,19 +153,20 @@ public sealed class UserPermissionService : IUserPermissionService
         var grantTypeString = requestDto.GrantType.ToString();
         var validFrom = requestDto.ValidFrom ?? existingOverride.ValidFrom;
 
-        await _uow.ExecuteInTransactionAsync(async () =>
-        {
 
-            await _repo.UpdateUserPermissionOverrideAsync(
-                userPermissionId,
-                grantTypeString,
-                requestDto.Reason?.Trim(),
-                validFrom,
-                requestDto.ValidTo,
-                requestDto.IsActive,
-                updatedBy,
-                ct);
-        }, ct);
+        var updatedPermission = new UserPermission
+        {
+            Id = userPermissionId,
+            GrantType = requestDto.GrantType, 
+            Reason = requestDto.Reason?.Trim(),
+            ValidFrom = validFrom,
+            ValidTo = requestDto.ValidTo,
+            IsActive = requestDto.IsActive,
+            UpdatedBy = _currentUser.UserId,
+            UpdatedAt = _date.UtcNow
+        };
+
+        await _repo.UpdateUserPermissionOverrideAsync(updatedPermission, ct);
 
         _logger.LogInformation("User permission override '{UserPermissionId}' updated successfully.", userPermissionId);
         return ApiResponse<bool>.Success(true, "User permission override updated successfully.");
@@ -182,16 +189,14 @@ public sealed class UserPermissionService : IUserPermissionService
                 UserPermissionErrors.UserPermissionNotFound);
         }
 
-        await _uow.ExecuteInTransactionAsync(async () =>
-        {
-            await _repo.DeleteUserPermissionOverrideAsync(userPermissionId, ct);
-        }, ct);
+
+         await _repo.DeleteUserPermissionOverrideAsync(userPermissionId, ct);
 
         _logger.LogInformation("User permission override '{UserPermissionId}' deleted successfully.", userPermissionId);
         return ApiResponse<bool>.Success(true, "User permission override deleted successfully.");
     }
 
-    public async Task<ApiResponse<bool>> SetUserPermissionsBulkAsync(SetUserPermissionsBulkRequestDto requestDto, Guid? grantedBy = null, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> SetUserPermissionsBulkAsync(SetUserPermissionsBulkRequestDto requestDto, CancellationToken ct = default)
     {
         var validation = await _bulkOverrideValidator.ValidateAsync(requestDto, ct);
         if (!validation.IsValid)
@@ -210,6 +215,7 @@ public sealed class UserPermissionService : IUserPermissionService
         }
 
         var distinctPermissionIds = requestDto.Overrides.Select(o => o.PermissionId).Distinct().ToList();
+
         var existingPermissions = await _repo.GetPermissionsByIdsAsync(distinctPermissionIds, ct);
         if (existingPermissions.Count != distinctPermissionIds.Count)
         {
@@ -218,12 +224,27 @@ public sealed class UserPermissionService : IUserPermissionService
                 PermissionErrors.PermissionNotFound);
         }
 
+        var permissionsToSet = requestDto.Overrides.Select(o => new UserPermission
+        {
+            Id = Guid.NewGuid(),
+            UserId = requestDto.UserId,
+            PermissionId = o.PermissionId,
+            GrantType = o.GrantType, 
+            Reason = o.Reason?.Trim(),
+            ValidFrom = o.ValidFrom ?? _date.UtcNow,
+            ValidTo = o.ValidTo,
+            GrantedBy = _currentUser.UserId,
+            IsActive = true
+        }).ToList();
+
         await _uow.ExecuteInTransactionAsync(async () =>
         {
             await _repo.RemoveAllPermissionOverridesFromUserAsync(requestDto.UserId, ct);
-            await _repo.AddUserPermissionOverridesBulkAsync(requestDto.UserId, requestDto.Overrides, grantedBy, ct);
+            if (permissionsToSet.Any())
+            {
+                await _repo.AddUserPermissionOverridesBulkAsync(requestDto.UserId, permissionsToSet, ct);
+            }
         }, ct);
-
         _logger.LogInformation("Bulk permission overrides updated for User '{UserId}'. Total: {Count}.", requestDto.UserId, requestDto.Overrides.Count);
         return ApiResponse<bool>.Success(true, "Bulk user permission overrides updated successfully.");
     }
@@ -261,9 +282,9 @@ public sealed class UserPermissionService : IUserPermissionService
         var userRoles = await _repo.GetRolesByUserIdAsync(userId, ct);
         var activeRoleIds = userRoles.Where(r => r.IsActive).Select(r => r.RoleId).ToList();
 
-        foreach (var roleId in activeRoleIds)
+        if (activeRoleIds.Any())
         {
-            var hasRolePermission = await _repo.RoleHasPermissionByCodeAsync(roleId, normalizedCode, ct);
+            var hasRolePermission = await _repo.AnyRoleHasPermissionByCodeAsync(activeRoleIds, normalizedCode, ct);
             if (hasRolePermission)
             {
                 return ApiResponse<bool>.Success(true, "Permission granted via user role.");

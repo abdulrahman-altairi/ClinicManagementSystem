@@ -24,4 +24,8 @@ public static class RoleErrors
     public static readonly ErrorModel RoleInUse = ErrorModel.Global(
         "Cannot delete role as it is currently assigned to one or more active users.",
         ErrorCode.RoleInUse.ToString());
+
+    public static readonly ErrorModel InvalidRoleCode = ErrorModel.Global(
+        "The provided role code is incorrect or does not exist in our system. Please verify the code and try again.",
+        ErrorCode.InvalidRoleCode.ToString());
 }

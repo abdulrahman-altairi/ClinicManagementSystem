@@ -62,6 +62,7 @@ public enum ErrorCode
     InvalidGrantType = 6023,
     InvalidOverrideValidityPeriod = 6024,
     EmptyOverrideList = 6025,
+    InvalidRoleCode = 6026,
 
     // ── Two-Factor Authentication (2FA) ──────────────────────────────────────
     RequiresTwoFactor = 7000,

@@ -4,6 +4,7 @@ using ClinicManagementSystem.Application.Common.Models;
 using ClinicManagementSystem.Application.DTOs.Auth.Role;
 using ClinicManagementSystem.Application.Interfaces.Repositories;
 using ClinicManagementSystem.Application.Interfaces.Services.Auth;
+using ClinicManagementSystem.Domain.Entities.Auth;
 using FluentValidation;
 using Microsoft.Extensions.Logging;
 
@@ -37,6 +38,14 @@ public sealed class RoleService : IRoleService
     public async Task<ApiResponse<IReadOnlyList<RoleResponseDto>>> GetAllRolesAsync(CancellationToken ct = default)
     {
         var roles = await _repo.GetAllRolesAsync(ct);
+
+        if (roles is null || !roles.Any())
+        {
+            return ApiResponse<IReadOnlyList<RoleResponseDto>>.Success(
+                Array.Empty<RoleResponseDto>(), 
+                "No roles found.");
+        }
+
         return ApiResponse<IReadOnlyList<RoleResponseDto>>.Success(roles, "Roles retrieved successfully.");
     }
 
@@ -80,15 +89,18 @@ public sealed class RoleService : IRoleService
                 RoleErrors.RoleAlreadyExists);
         }
 
-        var newRoleId = Guid.NewGuid();
-
-        await _uow.ExecuteInTransactionAsync(async () =>
+        var role = new Role
         {
-            await _repo.CreateRoleAsync(newRoleId, requestDto.RoleName.Trim(), normalizedName, requestDto.Description, ct);
-        }, ct);
+            Id = Guid.NewGuid(),
+            RoleName = requestDto.RoleName.Trim(),
+            NormalizedName = normalizedName,
+            Description = requestDto.Description
+        };
 
-        _logger.LogInformation("Role '{RoleName}' (ID: {RoleId}) successfully created.", requestDto.RoleName, newRoleId);
-        return ApiResponse<Guid>.Success(newRoleId, "Role created successfully.");
+        await _repo.CreateRoleAsync(role, ct);
+
+        _logger.LogInformation("Role '{RoleName}' (ID: {RoleId}) successfully created.", role.RoleName, role.Id);
+        return ApiResponse<Guid>.Success(role.Id, "Role created successfully.");
     }
 
     public async Task<ApiResponse<bool>> UpdateRoleAsync(Guid roleId, UpdateRoleRequestDto requestDto, CancellationToken ct = default)
@@ -136,7 +148,15 @@ public sealed class RoleService : IRoleService
             }
         }
 
-        await _repo.UpdateRoleAsync(roleId, requestDto.RoleName.Trim(), normalizedName, requestDto.Description, ct);
+        var role = new Role
+        {
+            Id = roleId,
+            RoleName = requestDto.RoleName.Trim(),
+            NormalizedName = normalizedName,
+            Description = requestDto.Description
+        };
+
+        await _repo.UpdateRoleAsync(role, ct);
 
         _logger.LogInformation("Role '{RoleId}' updated successfully.", roleId);
         return ApiResponse<bool>.Success(true, "Role details updated successfully.");
@@ -174,12 +194,101 @@ public sealed class RoleService : IRoleService
                 RoleErrors.RoleInUse);
         }
 
-        await _uow.ExecuteInTransactionAsync(async () =>
-        {
-            await _repo.DeleteRoleAsync(roleId, ct);
-        }, ct);
+
+        await _repo.DeleteRoleAsync(roleId, ct);
 
         _logger.LogInformation("Role '{RoleId}' deleted successfully.", roleId);
         return ApiResponse<bool>.Success(true, "Role deleted successfully.");
+    }
+
+    public async Task<ApiResponse<PaginatedList<RoleResponseDto>>> SearchRolesAsync(RoleSearchFilter filter, CancellationToken ct = default)
+    {
+        var (roles, totalCount) = await _repo.SearchRolesAsync(filter, ct);
+
+        if (roles is null || !roles.Any())
+        {
+            var emptyList = new PaginatedList<RoleResponseDto>(Array.Empty<RoleResponseDto>(), 0, filter.PageNumber, filter.PageSize);
+            return ApiResponse<PaginatedList<RoleResponseDto>>.Success(emptyList, "No roles matched the search criteria.");
+        }
+
+        var rolesDto = roles.Select(r => new RoleResponseDto
+        {
+            RoleId = r.Id,
+            RoleName = r.RoleName,
+            Description = r.Description,
+            IsSystemRole = r.IsSystemRole,
+            IsActive = r.IsActive,
+            CreatedAt = r.CreatedAt
+        }).ToList();
+
+        var paginatedResult = new PaginatedList<RoleResponseDto>(rolesDto, totalCount, filter.PageNumber, filter.PageSize);
+
+        return ApiResponse<PaginatedList<RoleResponseDto>>.Success(paginatedResult, "Roles search completed successfully.");
+    }
+
+    public async Task<ApiResponse<List<RoleResponseDto>>> GetSystemRolesAsync(CancellationToken ct = default)
+    {
+        var roles = await _repo.GetSystemRolesAsync(ct);
+
+        if (roles is null || !roles.Any())
+        {
+            return ApiResponse<List<RoleResponseDto>>.Success(new List<RoleResponseDto>(), "No system roles found.");
+        }
+
+        var rolesDto = roles.Select(r => new RoleResponseDto
+        {
+            RoleId = r.Id,
+            RoleName = r.RoleName,
+            Description = r.Description,
+            IsSystemRole = r.IsSystemRole,
+            IsActive = r.IsActive,
+            CreatedAt = r.CreatedAt
+        }).ToList();
+
+        return ApiResponse<List<RoleResponseDto>>.Success(rolesDto, "System roles retrieved successfully.");
+    }
+
+   public async Task<ApiResponse<bool>> ToggleRoleStatusAsync(Guid roleId, bool isActive, CancellationToken ct = default)
+    {
+        if (roleId == Guid.Empty)
+        {
+            return ApiResponse<bool>.Failure(
+                "Invalid role identifier.",
+                RoleErrors.InvalidRoleId);
+        }
+
+        var existingRole = await _repo.GetRoleByIdAsync(roleId, ct);
+        if (existingRole is null)
+        {
+            return ApiResponse<bool>.Failure(
+                "Role not found.",
+                RoleErrors.RoleNotFound);
+        }
+
+        if (existingRole.IsSystemRole && !isActive)
+        {
+            return ApiResponse<bool>.Failure(
+                "Operation prohibited. System critical roles cannot be deactivated.",
+                RoleErrors.SystemRoleProtected);
+        }
+
+        var updatedRole = new Role
+        {
+            Id = existingRole.RoleId,
+            RoleName = existingRole.RoleName,
+            NormalizedName = existingRole.RoleName.Trim().ToUpperInvariant(),
+            Description = existingRole.Description,
+            IsActive = isActive,
+            IsSystemRole = existingRole.IsSystemRole,
+            CreatedAt = existingRole.CreatedAt
+        };
+
+        await _uow.ExecuteInTransactionAsync(async () =>
+        {
+            await _repo.UpdateRoleAsync(updatedRole, ct);
+        }, ct);
+
+        _logger.LogInformation("Role '{RoleId}' status successfully toggled to Active = {IsActive}.", roleId, isActive);
+        return ApiResponse<bool>.Success(true, $"Role status successfully updated to {(isActive ? "Active" : "Inactive")}.");
     }
 }

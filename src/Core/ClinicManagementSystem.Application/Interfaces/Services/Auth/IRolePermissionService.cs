@@ -7,7 +7,7 @@ public interface IRolePermissionService
 {
     Task<ApiResponse<RolePermissionsDetailsResponseDto>> GetPermissionsByRoleIdAsync(Guid roleId, CancellationToken ct = default);
     Task<ApiResponse<bool>> AssignPermissionsToRoleAsync(AssignPermissionsToRoleRequestDto requestDto, CancellationToken ct = default);
-    Task<ApiResponse<Guid>> AddPermissionToRoleAsync(Guid roleId, Guid permissionId, CancellationToken ct = default);
+    Task<ApiResponse<Guid>> AddPermissionToRoleAsync(AddPermissionToRoleDto requestDto, CancellationToken ct = default);
     Task<ApiResponse<bool>> RemovePermissionFromRoleAsync(Guid roleId, Guid permissionId, CancellationToken ct = default);
     Task<ApiResponse<bool>> HasPermissionAsync(Guid roleId, string permissionCode, CancellationToken ct = default);
 }

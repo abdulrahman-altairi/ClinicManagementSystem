@@ -4,6 +4,7 @@ using ClinicManagementSystem.Application.Common.Models;
 using ClinicManagementSystem.Application.DTOs.Auth.UserRole;
 using ClinicManagementSystem.Application.Interfaces.Repositories;
 using ClinicManagementSystem.Application.Interfaces.Services.Auth;
+using ClinicManagementSystem.Domain.Entities.Auth;
 using FluentValidation;
 using Microsoft.Extensions.Logging;
 
@@ -14,6 +15,7 @@ public sealed class UserRoleService : IUserRoleService
     private readonly IIdentityRepository _repo;
     private readonly ILogger<UserRoleService> _logger;
     private readonly IUnitOfWork _uow;
+    private readonly IDateTimeProvider _date;
     private readonly IValidator<AssignRolesToUserRequestDto> _assignRolesValidator;
     private readonly IValidator<AddRoleToUserRequestDto> _addRoleValidator;
 
@@ -21,12 +23,14 @@ public sealed class UserRoleService : IUserRoleService
         IIdentityRepository repo,
         ILogger<UserRoleService> logger,
         IUnitOfWork uow,
+        IDateTimeProvider date,
         IValidator<AssignRolesToUserRequestDto> assignRolesValidator,
         IValidator<AddRoleToUserRequestDto> addRoleValidator)
     {
         _repo = repo;
         _logger = logger;
         _uow = uow;
+        _date = date;
         _assignRolesValidator = assignRolesValidator;
         _addRoleValidator = addRoleValidator;
     }
@@ -45,7 +49,7 @@ public sealed class UserRoleService : IUserRoleService
         {
             return ApiResponse<UserRolesDetailsResponseDto>.Failure(
                 "User not found.",
-                UserErrors.UserNotFound);
+                UserErrors.UserNotFound);   
         }
 
         var roles = await _repo.GetRolesByUserIdAsync(userId, ct);
@@ -68,7 +72,7 @@ public sealed class UserRoleService : IUserRoleService
         {
             return ApiResponse<bool>.Failure(
                 "Payload validation failed.",
-                validation.Errors.Select(e => new ErrorModel(e.PropertyName, e.ErrorMessage, e.ErrorCode)).ToList());
+                validation.Errors.Select(e => new ErrorModel(e.PropertyName, e.ErrorMessage, e.ErrorCode)).ToList());   
         }
 
         var user = await _repo.GetUserByIdAsync(requestDto.UserId, ct);
@@ -76,23 +80,36 @@ public sealed class UserRoleService : IUserRoleService
         {
             return ApiResponse<bool>.Failure(
                 "User not found.",
-                UserErrors.UserNotFound);
+                UserErrors.UserNotFound);   
         }
 
         var distinctRoleIds = requestDto.Roles.Select(r => r.RoleId).Distinct().ToList();
-        var existingRoles = await _repo.GetRolesByIdsAsync(distinctRoleIds, ct);
-
-        if (existingRoles.Count != distinctRoleIds.Count)
+        if (distinctRoleIds.Any())
         {
-            return ApiResponse<bool>.Failure(
-                "One or more role IDs are invalid or non-existent.",
-                RoleErrors.RoleNotFound);
+            var existingRoles = await _repo.GetRolesByIdsAsync(distinctRoleIds, ct);
+
+            if (existingRoles.Count != distinctRoleIds.Count)
+            {
+                return ApiResponse<bool>.Failure(
+                    "One or more role IDs are invalid or non-existent.",
+                    RoleErrors.RoleNotFound);   
+            }
         }
+
+        var userRolesToAssign = requestDto.Roles.Select(r => new UserRole
+        {
+            Id = Guid.NewGuid(), 
+            UserId = requestDto.UserId,
+            RoleId = r.RoleId,
+            ValidFrom = r.ValidFrom ?? _date.UtcNow,
+            ValidTo = r.ValidTo,
+            AssignedBy = assignedBy
+        }).ToList();
 
         await _uow.ExecuteInTransactionAsync(async () =>
         {
             await _repo.RemoveAllRolesFromUserAsync(requestDto.UserId, ct);
-            await _repo.AssignRolesToUserAsync(requestDto.UserId, requestDto.Roles, assignedBy, ct);
+            await _repo.AssignRolesToUserAsync(requestDto.UserId, userRolesToAssign, ct);
         }, ct);
 
         _logger.LogInformation("Successfully assigned {Count} roles to User '{UserId}'.", distinctRoleIds.Count, requestDto.UserId);
@@ -106,7 +123,7 @@ public sealed class UserRoleService : IUserRoleService
         {
             return ApiResponse<Guid>.Failure(
                 "Payload validation failed.",
-                validation.Errors.Select(e => new ErrorModel(e.PropertyName, e.ErrorMessage, e.ErrorCode)).ToList());
+                validation.Errors.Select(e => new ErrorModel(e.PropertyName, e.ErrorMessage, e.ErrorCode)).ToList());   
         }
 
         var user = await _repo.GetUserByIdAsync(requestDto.UserId, ct);
@@ -114,7 +131,7 @@ public sealed class UserRoleService : IUserRoleService
         {
             return ApiResponse<Guid>.Failure(
                 "User not found.",
-                UserErrors.UserNotFound);
+                UserErrors.UserNotFound);   
         }
 
         var role = await _repo.GetRoleByIdAsync(requestDto.RoleId, ct);
@@ -122,7 +139,7 @@ public sealed class UserRoleService : IUserRoleService
         {
             return ApiResponse<Guid>.Failure(
                 "Role not found.",
-                RoleErrors.RoleNotFound);
+                RoleErrors.RoleNotFound);   
         }
 
         var exists = await _repo.UserHasRoleAsync(requestDto.UserId, requestDto.RoleId, ct);
@@ -130,26 +147,24 @@ public sealed class UserRoleService : IUserRoleService
         {
             return ApiResponse<Guid>.Failure(
                 "Role already assigned to user.",
-                UserRoleErrors.UserRoleAlreadyExists);
+                UserRoleErrors.UserRoleAlreadyExists);   
         }
 
-        var userRoleId = Guid.NewGuid();
-        var validFrom = requestDto.ValidFrom ?? DateTimeOffset.UtcNow;
 
-        await _uow.ExecuteInTransactionAsync(async () =>
+        var userRole = new UserRole
         {
-            await _repo.AddUserRoleAsync(
-                userRoleId,
-                requestDto.UserId,
-                requestDto.RoleId,
-                validFrom,
-                requestDto.ValidTo,
-                assignedBy,
-                ct);
-        }, ct);
+            Id = Guid.NewGuid(),
+            UserId = requestDto.UserId,
+            RoleId = requestDto.RoleId,
+            ValidFrom = requestDto.ValidFrom ?? _date.UtcNow,
+            ValidTo = requestDto.ValidTo,
+            AssignedBy = assignedBy
+        };
+
+        await _repo.AddUserRoleAsync(userRole, ct);
 
         _logger.LogInformation("Role '{RoleId}' added to User '{UserId}'.", requestDto.RoleId, requestDto.UserId);
-        return ApiResponse<Guid>.Success(userRoleId, "Role added to user successfully.");
+        return ApiResponse<Guid>.Success(userRole.Id, "Role added to user successfully.");
     }
 
     public async Task<ApiResponse<bool>> RemoveRoleFromUserAsync(Guid userId, Guid roleId, CancellationToken ct = default)
@@ -184,10 +199,7 @@ public sealed class UserRoleService : IUserRoleService
                 UserRoleErrors.UserRoleNotFound);
         }
 
-        await _uow.ExecuteInTransactionAsync(async () =>
-        {
-            await _repo.RemoveUserRoleAsync(userId, roleId, ct);
-        }, ct);
+        await _repo.RemoveUserRoleAsync(userId, roleId, ct);
 
         _logger.LogInformation("Role '{RoleId}' removed from User '{UserId}'.", roleId, userId);
         return ApiResponse<bool>.Success(true, "Role removed from user successfully.");
@@ -198,8 +210,8 @@ public sealed class UserRoleService : IUserRoleService
         if (userId == Guid.Empty)
         {
             return ApiResponse<bool>.Failure(
-                "Invalid user identifier.",
-                UserErrors.InvalidUserId);
+                "Invalid role code format.",
+                RoleErrors.InvalidRoleCode);
         }
 
         if (string.IsNullOrWhiteSpace(roleCode))

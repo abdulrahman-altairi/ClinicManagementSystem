@@ -4,6 +4,7 @@ using ClinicManagementSystem.Application.Common.Models;
 using ClinicManagementSystem.Application.DTOs.Auth.AssignPermissions;
 using ClinicManagementSystem.Application.Interfaces.Repositories;
 using ClinicManagementSystem.Application.Interfaces.Services.Auth;
+using ClinicManagementSystem.Domain.Entities.Auth;
 using FluentValidation;
 using Microsoft.Extensions.Logging;
 
@@ -14,17 +15,23 @@ public sealed class RolePermissionService : IRolePermissionService
     private readonly IIdentityRepository _repo;
     private readonly ILogger<RolePermissionService> _logger;
     private readonly IUnitOfWork _uow;
+    private readonly ICurrentUserService _currentUser;
+    private readonly IDateTimeProvider _date;
     private readonly IValidator<AssignPermissionsToRoleRequestDto> _assignPermissionsValidator;
 
     public RolePermissionService(
         IIdentityRepository repo,
         ILogger<RolePermissionService> logger,
         IUnitOfWork uow,
+        ICurrentUserService currentUser,
+        IDateTimeProvider date,
         IValidator<AssignPermissionsToRoleRequestDto> assignPermissionsValidator)
     {
         _repo = repo;
         _logger = logger;
         _uow = uow;
+        _currentUser = currentUser;
+        _date = date;
         _assignPermissionsValidator = assignPermissionsValidator;
     }
 
@@ -40,7 +47,7 @@ public sealed class RolePermissionService : IRolePermissionService
         var role = await _repo.GetRoleByIdAsync(roleId, ct);
         if (role is null)
         {
-            return ApiResponse<RolePermissionsDetailsResponseDto>.Failure(
+             return ApiResponse<RolePermissionsDetailsResponseDto>.Failure(
                 "Role not found.",
                 RoleErrors.RoleNotFound);
         }
@@ -83,69 +90,80 @@ public sealed class RolePermissionService : IRolePermissionService
         }
 
         var distinctPermissionIds = requestDto.PermissionIds.Distinct().ToList();
-        var existingPermissions = await _repo.GetPermissionsByIdsAsync(distinctPermissionIds, ct);
 
-        if (existingPermissions.Count != distinctPermissionIds.Count)
+        
+
+        if (distinctPermissionIds.Any())
         {
-            return ApiResponse<bool>.Failure(
-                "One or more permission IDs are invalid or non-existent.",
-                PermissionErrors.PermissionNotFound);
+            var existingPermissions = await _repo.GetPermissionsByIdsAsync(distinctPermissionIds, ct);
+    
+            if (existingPermissions.Count != distinctPermissionIds.Count)
+            {
+                return ApiResponse<bool>.Failure(
+                    "One or more permission IDs are invalid or non-existent.",
+                    PermissionErrors.PermissionNotFound);
+            }
         }
-
+        var rolePermissions = distinctPermissionIds.Select(permissionId => new RolePermission
+        {
+            Id = Guid.NewGuid(),
+            RoleId = requestDto.RoleId,
+            PermissionId = permissionId
+        }).ToList();
+    
         await _uow.ExecuteInTransactionAsync(async () =>
         {
             await _repo.RemoveAllPermissionsFromRoleAsync(requestDto.RoleId, ct);
-            await _repo.AssignPermissionsToRoleAsync(requestDto.RoleId, distinctPermissionIds, ct);
+            
+            await _repo.AssignPermissionsToRoleAsync(requestDto.RoleId, rolePermissions, ct);
         }, ct);
-
+        
         _logger.LogInformation("Successfully assigned {Count} permissions to Role '{RoleId}'.", distinctPermissionIds.Count, requestDto.RoleId);
         return ApiResponse<bool>.Success(true, "Permissions assigned to role successfully.");
     }
 
-    public async Task<ApiResponse<Guid>> AddPermissionToRoleAsync(Guid roleId, Guid permissionId, CancellationToken ct = default)
+    public async Task<ApiResponse<Guid>> AddPermissionToRoleAsync(AddPermissionToRoleDto requestDto, CancellationToken ct = default)
     {
-        if (roleId == Guid.Empty)
+        if (requestDto.RoleId == Guid.Empty)
         {
             return ApiResponse<Guid>.Failure("Invalid role identifier.", RoleErrors.InvalidRoleId);
         }
-
-        if (permissionId == Guid.Empty)
+        if (requestDto.PermissionId == Guid.Empty)
         {
             return ApiResponse<Guid>.Failure("Invalid permission identifier.", PermissionErrors.InvalidPermissionId);
         }
-
-        var role = await _repo.GetRoleByIdAsync(roleId, ct);
+        var role = await _repo.GetRoleByIdAsync(requestDto.RoleId, ct);
         if (role is null)
         {
             return ApiResponse<Guid>.Failure("Role not found.", RoleErrors.RoleNotFound);
         }
-
         if (role.IsSystemRole)
         {
             return ApiResponse<Guid>.Failure("Operation prohibited.", RolePermissionErrors.CannotModifySystemRolePermissions);
         }
-
-        var permission = await _repo.GetPermissionByIdAsync(permissionId, ct);
+        var permission = await _repo.GetPermissionByIdAsync(requestDto.PermissionId, ct);
         if (permission is null)
         {
             return ApiResponse<Guid>.Failure("Permission not found.", PermissionErrors.PermissionNotFound);
         }
-
-        var exists = await _repo.RoleHasPermissionAsync(roleId, permissionId, ct);
+        var exists = await _repo.RoleHasPermissionAsync(requestDto.RoleId, requestDto.PermissionId, ct);
         if (exists)
         {
             return ApiResponse<Guid>.Failure("Permission already assigned.", RolePermissionErrors.RolePermissionAlreadyExists);
         }
-
-        var rolePermissionId = Guid.NewGuid();
-
-        await _uow.ExecuteInTransactionAsync(async () =>
+        var rolePermission = new RolePermission
         {
-            await _repo.AddPermissionToRoleAsync(rolePermissionId, roleId, permissionId, ct);
-        }, ct);
+            Id = Guid.NewGuid(),
+            RoleId = requestDto.RoleId,
+            PermissionId = requestDto.PermissionId,
+            CreatedAt = _date.UtcNow,
+            CreatedBy = _currentUser.UserId
+        };
 
-        _logger.LogInformation("Permission '{PermissionId}' added to Role '{RoleId}'.", permissionId, roleId);
-        return ApiResponse<Guid>.Success(rolePermissionId, "Permission added to role successfully.");
+        await _repo.AddPermissionToRoleAsync(rolePermission, ct);
+
+        _logger.LogInformation("Permission '{PermissionId}' added to Role '{RoleId}'.", requestDto.PermissionId, requestDto.RoleId);
+        return ApiResponse<Guid>.Success(rolePermission.Id, "Permission added to role successfully.");
     }
 
     public async Task<ApiResponse<bool>> RemovePermissionFromRoleAsync(Guid roleId, Guid permissionId, CancellationToken ct = default)
@@ -154,33 +172,25 @@ public sealed class RolePermissionService : IRolePermissionService
         {
             return ApiResponse<bool>.Failure("Invalid role identifier.", RoleErrors.InvalidRoleId);
         }
-
         if (permissionId == Guid.Empty)
         {
             return ApiResponse<bool>.Failure("Invalid permission identifier.", PermissionErrors.InvalidPermissionId);
         }
-
         var role = await _repo.GetRoleByIdAsync(roleId, ct);
         if (role is null)
         {
             return ApiResponse<bool>.Failure("Role not found.", RoleErrors.RoleNotFound);
         }
-
         if (role.IsSystemRole)
         {
             return ApiResponse<bool>.Failure("Operation prohibited.", RolePermissionErrors.CannotModifySystemRolePermissions);
         }
-
         var exists = await _repo.RoleHasPermissionAsync(roleId, permissionId, ct);
         if (!exists)
         {
             return ApiResponse<bool>.Failure("Mapping not found.", RolePermissionErrors.RolePermissionNotFound);
         }
-
-        await _uow.ExecuteInTransactionAsync(async () =>
-        {
-            await _repo.RemovePermissionFromRoleAsync(roleId, permissionId, ct);
-        }, ct);
+        await _repo.RemovePermissionFromRoleAsync(roleId, permissionId, ct);
 
         _logger.LogInformation("Permission '{PermissionId}' removed from Role '{RoleId}'.", permissionId, roleId);
         return ApiResponse<bool>.Success(true, "Permission removed from role successfully.");
@@ -192,12 +202,10 @@ public sealed class RolePermissionService : IRolePermissionService
         {
             return ApiResponse<bool>.Failure("Invalid role identifier.", RoleErrors.InvalidRoleId);
         }
-
         if (string.IsNullOrWhiteSpace(permissionCode))
         {
             return ApiResponse<bool>.Failure("Invalid permission code.", PermissionErrors.InvalidPermissionCodeFormat);
         }
-
         var hasPermission = await _repo.RoleHasPermissionByCodeAsync(roleId, permissionCode.Trim(), ct);
         return ApiResponse<bool>.Success(hasPermission, "Permission status checked successfully.");
     }
