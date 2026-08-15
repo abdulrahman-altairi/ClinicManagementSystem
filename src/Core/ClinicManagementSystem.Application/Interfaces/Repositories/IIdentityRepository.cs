@@ -18,6 +18,7 @@ public interface IIdentityRepository
     Task<bool> IsUsernameTakenAsync(string username, CancellationToken ct = default);
     Task<Guid> CreateUserAsync(ApplicationUser user, CancellationToken ct = default);
     Task UpdateUserAsync(ApplicationUser user, CancellationToken ct = default);
+    Task<bool> UpdateUserProfileAsync(ApplicationUser user, CancellationToken ct = default);
     Task UpdateLoginAuditAsync(Guid userId, DateTimeOffset loginTime, string? ipAddress, byte accessFailedCount, DateTimeOffset? lockoutEnd, CancellationToken ct = default);
     Task UpdatePasswordAsync(Guid userId, string passwordHash, string passwordSalt, DateTimeOffset changedAt, CancellationToken ct = default);
     Task TrackPasswordHistoryAsync(PasswordHistory history, CancellationToken ct = default);

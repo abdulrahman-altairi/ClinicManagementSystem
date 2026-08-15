@@ -1,7 +1,5 @@
 <Solution>
-  <Folder Name="/database/">
-    <File Path="database/SqlQuery_1.sql" />
-  </Folder>
+  <Folder Name="/database/" />
   <Folder Name="/src/" />
   <Folder Name="/src/Core/">
     <Project Path="src/Core/ClinicManagementSystem.Application/ClinicManagementSystem.Application.csproj" />
