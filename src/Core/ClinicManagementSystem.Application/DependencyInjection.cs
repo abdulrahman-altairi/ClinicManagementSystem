@@ -15,6 +15,8 @@ public static class DependencyInjection
     {
         services.Configure<AuthOptions>(configuration.GetSection(AuthOptions.SectionName));
 
+        services.Configure<ResendOptions>(configuration.GetSection(ResendOptions.SectionName));
+
         // services.AddScoped<IAuthServices, AuthServices>();
 
         services.Scan(scan => scan
