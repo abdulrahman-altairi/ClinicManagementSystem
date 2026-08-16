@@ -50,53 +50,36 @@ public sealed class UserManagementService : IUserManagementService
 
     public async Task<ApiResponse<PaginatedList<UserResponseDto>>> GetAllUsersAsync(UserQueryParams queryParams, CancellationToken ct = default)
     {
-        var allRoles = await _repo.GetAllRolesAsync(ct);
-        
-        var allUsers = new List<ApplicationUser>(); 
-        
-        var filteredUsers = allUsers.AsEnumerable();
+        var (users, userRolesMap, totalCount) = await _repo.GetPagedUsersAsync(queryParams, ct);
 
-        if (!string.IsNullOrWhiteSpace(queryParams.SearchTerm))
+        if (users is null || !users.Any())
         {
-            var term = queryParams.SearchTerm.Trim().ToUpperInvariant();
-            filteredUsers = filteredUsers.Where(u => 
-                u.Username.ToUpperInvariant().Contains(term) || 
-                u.Email.ToUpperInvariant().Contains(term) || 
-                (u.PhoneNumber != null && u.PhoneNumber.Contains(term)) ||
-                u.FirstName.ToUpperInvariant().Contains(term) ||
-                u.LastName.ToUpperInvariant().Contains(term));
+            var emptyList = new PaginatedList<UserResponseDto>(
+                Array.Empty<UserResponseDto>(), 
+                0, 
+                queryParams.PageNumber, 
+                queryParams.PageSize);
+
+            return ApiResponse<PaginatedList<UserResponseDto>>.Success(
+                emptyList, 
+                "No users found.");
         }
 
-        if (queryParams.IsActive.HasValue)
+        var userDtos = users.Select(user => 
         {
-            filteredUsers = filteredUsers.Where(u => u.IsActive == queryParams.IsActive.Value);
-        }
+            var roles = userRolesMap.TryGetValue(user.Id, out var rList) ? rList : new List<string>();
+            return MapToUserResponseDto(user, roles);
+        }).ToList();
 
-        if (!string.IsNullOrWhiteSpace(queryParams.SortBy))
-        {
-            filteredUsers = queryParams.SortBy.ToLowerInvariant() switch
-            {
-                "username" => queryParams.IsDescending ? filteredUsers.OrderByDescending(u => u.Username) : filteredUsers.OrderBy(u => u.Username),
-                "email" => queryParams.IsDescending ? filteredUsers.OrderByDescending(u => u.Email) : filteredUsers.OrderBy(u => u.Email),
-                _ => queryParams.IsDescending ? filteredUsers.OrderByDescending(u => u.CreatedAt) : filteredUsers.OrderBy(u => u.CreatedAt)
-            };
-        }
+        var paginatedResult = new PaginatedList<UserResponseDto>(
+            userDtos, 
+            totalCount, 
+            queryParams.PageNumber, 
+            queryParams.PageSize);
 
-        var totalCount = filteredUsers.Count();
-        var pagedUsers = filteredUsers
-            .Skip((queryParams.PageNumber - 1) * queryParams.PageSize)
-            .Take(queryParams.PageSize)
-            .ToList();
-
-        var userDtos = new List<UserResponseDto>();
-        foreach (var user in pagedUsers)
-        {
-            var roles = await _repo.GetUserRolesAsync(user.Id, ct);
-            userDtos.Add(MapToUserResponseDto(user, roles));
-        }
-
-        var paginatedResult = new PaginatedList<UserResponseDto>(userDtos, totalCount, queryParams.PageNumber, queryParams.PageSize);
-        return ApiResponse<PaginatedList<UserResponseDto>>.Success(paginatedResult, "Users list retrieved successfully.");
+        return ApiResponse<PaginatedList<UserResponseDto>>.Success(
+            paginatedResult, 
+            "Users list retrieved successfully.");
     }
 
     public async Task<ApiResponse<IEnumerable<UserResponseDto>>> SearchUsersAsync(string searchTerm, CancellationToken ct = default)
@@ -316,6 +299,7 @@ public sealed class UserManagementService : IUserManagementService
             Email = user.Email,
             FirstName = user.FirstName,
             LastName = user.LastName,
+            DisplayName = $"{user.FirstName} {user.LastName}".Trim(),
             PhoneNumber = user.PhoneNumber,
             PhoneVerified = user.PhoneVerified,
             EmailVerified = user.EmailVerified,

@@ -56,7 +56,7 @@ public sealed class RolePermissionService : IRolePermissionService
 
         var response = new RolePermissionsDetailsResponseDto
         {
-            RoleId = role.RoleId,
+            RoleId = role.Id,
             RoleName = role.RoleName,
             AssignedPermissions = permissions
         };
@@ -107,7 +107,7 @@ public sealed class RolePermissionService : IRolePermissionService
         var rolePermissions = distinctPermissionIds.Select(permissionId => new RolePermission
         {
             Id = Guid.NewGuid(),
-            RoleId = requestDto.RoleId,
+            RoleId = role.Id,
             PermissionId = permissionId
         }).ToList();
     
@@ -154,8 +154,8 @@ public sealed class RolePermissionService : IRolePermissionService
         var rolePermission = new RolePermission
         {
             Id = Guid.NewGuid(),
-            RoleId = requestDto.RoleId,
-            PermissionId = requestDto.PermissionId,
+            RoleId = role.Id,
+            PermissionId = permission.Id,
             CreatedAt = _date.UtcNow,
             CreatedBy = _currentUser.UserId
         };

@@ -38,6 +38,7 @@ public sealed class PermissionService : IPermissionService
     public async Task<ApiResponse<IReadOnlyList<PermissionResponseDto>>> GetAllPermissionsAsync(CancellationToken ct = default)
     {
         var permissions = await _repo.GetAllPermissionsAsync(ct);
+
         if (permissions is null || !permissions.Any())
         {
             return ApiResponse<IReadOnlyList<PermissionResponseDto>>.Success(
@@ -45,7 +46,17 @@ public sealed class PermissionService : IPermissionService
                 "No permissions found.");
         }
 
-        return ApiResponse<IReadOnlyList<PermissionResponseDto>>.Success(permissions, "Permissions retrieved successfully.");
+        var responseDtos = permissions.Select(p => new PermissionResponseDto
+        {
+            PermissionId = p.Id, 
+            PermissionCode = p.PermissionCode,
+            PermissionName = p.PermissionName,
+            Module = p.Module,
+            Description = p.Description,
+            IsActive = p.IsActive
+        }).ToList();
+
+        return ApiResponse<IReadOnlyList<PermissionResponseDto>>.Success(responseDtos, "Permissions retrieved successfully.");
     }
 
     public async Task<ApiResponse<IReadOnlyList<GroupedPermissionsResponseDto>>> GetGroupedPermissionsAsync(CancellationToken ct = default)
@@ -60,14 +71,22 @@ public sealed class PermissionService : IPermissionService
         }
 
         var grouped = permissions
-            .GroupBy(p => string.IsNullOrWhiteSpace(p.Module) ? "General" : p.Module.Trim())
-            .Select(g => new GroupedPermissionsResponseDto
+        .GroupBy(p => string.IsNullOrWhiteSpace(p.Module) ? "General" : p.Module.Trim())
+        .Select(g => new GroupedPermissionsResponseDto
+        {
+            Module = g.Key,
+            Permissions = g.Select(p => new PermissionResponseDto
             {
-                Module = g.Key,
-                Permissions = g.ToList()
-            })
-            .OrderBy(g => g.Module)
-            .ToList();
+                PermissionId = p.Id, 
+                PermissionCode = p.PermissionCode,
+                PermissionName = p.PermissionName,
+                Module = p.Module,
+                Description = p.Description,
+                IsActive = p.IsActive
+            }).ToList()
+        })
+        .OrderBy(g => g.Module)
+        .ToList();
 
         return ApiResponse<IReadOnlyList<GroupedPermissionsResponseDto>>.Success(grouped, "Grouped permissions retrieved successfully.");
     }
@@ -89,7 +108,17 @@ public sealed class PermissionService : IPermissionService
                 PermissionErrors.PermissionNotFound);
         }
 
-        return ApiResponse<PermissionResponseDto>.Success(permission, "Permission details retrieved successfully.");
+        var dto = new PermissionResponseDto
+        {
+            PermissionId = permission.Id,
+            PermissionCode = permission.PermissionCode,
+            PermissionName = permission.PermissionName,
+            Module = permission.Module,
+            Description = permission.Description,
+            IsActive = permission.IsActive
+        };
+
+        return ApiResponse<PermissionResponseDto>.Success(dto, "Permission details retrieved successfully.");
     }
 
     public async Task<ApiResponse<PermissionResponseDto>> GetPermissionByCodeAsync(string permissionCode, CancellationToken ct = default)
@@ -109,7 +138,17 @@ public sealed class PermissionService : IPermissionService
                 PermissionErrors.PermissionNotFound);
         }
 
-        return ApiResponse<PermissionResponseDto>.Success(permission, "Permission details retrieved successfully.");
+        var responseDto = new PermissionResponseDto
+        {
+            PermissionId = permission.Id, 
+            PermissionCode = permission.PermissionCode,
+            PermissionName = permission.PermissionName,
+            Module = permission.Module,
+            Description = permission.Description,
+            IsActive = permission.IsActive
+        };
+
+        return ApiResponse<PermissionResponseDto>.Success(responseDto, "Permission details retrieved successfully.");
     }
 
     public async Task<ApiResponse<Guid>> CreatePermissionAsync(CreatePermissionRequestDto requestDto, CancellationToken ct = default)
@@ -178,19 +217,14 @@ public sealed class PermissionService : IPermissionService
                 PermissionErrors.PermissionNotFound);
         }
 
-        var permission = new Permission
-        {
-          Id = permissionId,
-          PermissionCode = existingPermission.PermissionCode,
-          PermissionName = requestDto.PermissionName.Trim(),
-          Module = string.IsNullOrWhiteSpace(requestDto.Module) ? "General" : requestDto.Module.Trim(),
-          Description = requestDto.Description,
-          IsActive = requestDto.IsActive,
-          UpdatedAt = _date.UtcNow,
-          UpdatedBy = _currentUser.UserId
-        };
+        existingPermission.PermissionName = requestDto.PermissionName.Trim();
+        existingPermission.Module = string.IsNullOrWhiteSpace(requestDto.Module) ? "General" : requestDto.Module.Trim();
+        existingPermission.Description = requestDto.Description;
+        existingPermission.IsActive = requestDto.IsActive;
+        existingPermission.UpdatedAt = _date.UtcNow;
+        existingPermission.UpdatedBy = _currentUser.UserId;
 
-        await _repo.UpdatePermissionAsync(permission, ct);
+        await _repo.UpdatePermissionAsync(existingPermission, ct);
 
         _logger.LogInformation("Permission '{PermissionId}' updated successfully.", permissionId);
         return ApiResponse<bool>.Success(true, "Permission details updated successfully.");
@@ -270,19 +304,11 @@ public sealed class PermissionService : IPermissionService
                 PermissionErrors.PermissionNotFound);
         }
 
-        var updatedPermission = new Permission
-        {
-            Id = existingPermission.PermissionId,
-            PermissionCode = existingPermission.PermissionCode,
-            PermissionName = existingPermission.PermissionName,
-            Module = existingPermission.Module,
-            Description = existingPermission.Description,
-            IsActive = isActive,
-            UpdatedAt = _date.UtcNow,
-            UpdatedBy = _currentUser.UserId
-        };
+        existingPermission.IsActive = isActive;
+        existingPermission.UpdatedAt = _date.UtcNow;
+        existingPermission.UpdatedBy = _currentUser.UserId;
 
-        await _repo.UpdatePermissionAsync(updatedPermission, ct);
+        await _repo.UpdatePermissionAsync(existingPermission, ct);
 
         _logger.LogInformation("Permission '{PermissionId}' status successfully toggled to Active = {IsActive} by User '{UpdatedBy}'.", 
             permissionId, isActive, _currentUser.UserId);

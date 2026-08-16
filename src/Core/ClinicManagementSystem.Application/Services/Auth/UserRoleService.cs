@@ -154,8 +154,8 @@ public sealed class UserRoleService : IUserRoleService
         var userRole = new UserRole
         {
             Id = Guid.NewGuid(),
-            UserId = requestDto.UserId,
-            RoleId = requestDto.RoleId,
+            UserId = user.Id,
+            RoleId = role.Id,
             ValidFrom = requestDto.ValidFrom ?? _date.UtcNow,
             ValidTo = requestDto.ValidTo,
             AssignedBy = assignedBy

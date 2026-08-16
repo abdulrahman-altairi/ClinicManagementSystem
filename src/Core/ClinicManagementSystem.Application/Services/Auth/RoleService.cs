@@ -46,7 +46,17 @@ public sealed class RoleService : IRoleService
                 "No roles found.");
         }
 
-        return ApiResponse<IReadOnlyList<RoleResponseDto>>.Success(roles, "Roles retrieved successfully.");
+        var roleDtos = roles.Select(role => new RoleResponseDto
+        {
+            RoleId = role.Id,
+            RoleName = role.RoleName,
+            Description = role.Description,
+            IsSystemRole = role.IsSystemRole,
+            IsActive = role.IsActive,
+            CreatedAt = role.CreatedAt
+        }).ToList();
+
+        return ApiResponse<IReadOnlyList<RoleResponseDto>>.Success(roleDtos, "Roles retrieved successfully.");
     }
 
     public async Task<ApiResponse<RoleResponseDto>> GetRoleByIdAsync(Guid roleId, CancellationToken ct = default)
@@ -66,7 +76,17 @@ public sealed class RoleService : IRoleService
                 RoleErrors.RoleNotFound);
         }
 
-        return ApiResponse<RoleResponseDto>.Success(role, "Role details retrieved successfully.");
+        var roleDto = new RoleResponseDto
+        {
+            RoleId = role.Id, 
+            RoleName = role.RoleName,
+            Description = role.Description,
+            IsSystemRole = role.IsSystemRole,
+            IsActive = role.IsActive,
+            CreatedAt = role.CreatedAt
+        };
+
+        return ApiResponse<RoleResponseDto>.Success(roleDto, "Role details retrieved successfully.");
     }
 
     public async Task<ApiResponse<Guid>> CreateRoleAsync(CreateRoleRequestDto requestDto, CancellationToken ct = default)
@@ -148,15 +168,11 @@ public sealed class RoleService : IRoleService
             }
         }
 
-        var role = new Role
-        {
-            Id = roleId,
-            RoleName = requestDto.RoleName.Trim(),
-            NormalizedName = normalizedName,
-            Description = requestDto.Description
-        };
+        existingRole.RoleName = requestDto.RoleName.Trim();
+        existingRole.NormalizedName = normalizedName;
+        existingRole.Description = requestDto.Description;
 
-        await _repo.UpdateRoleAsync(role, ct);
+        await _repo.UpdateRoleAsync(existingRole, ct);
 
         _logger.LogInformation("Role '{RoleId}' updated successfully.", roleId);
         return ApiResponse<bool>.Success(true, "Role details updated successfully.");
@@ -248,7 +264,7 @@ public sealed class RoleService : IRoleService
         return ApiResponse<List<RoleResponseDto>>.Success(rolesDto, "System roles retrieved successfully.");
     }
 
-   public async Task<ApiResponse<bool>> ToggleRoleStatusAsync(Guid roleId, bool isActive, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> ToggleRoleStatusAsync(Guid roleId, bool isActive, CancellationToken ct = default)
     {
         if (roleId == Guid.Empty)
         {
@@ -272,23 +288,15 @@ public sealed class RoleService : IRoleService
                 RoleErrors.SystemRoleProtected);
         }
 
-        var updatedRole = new Role
-        {
-            Id = existingRole.RoleId,
-            RoleName = existingRole.RoleName,
-            NormalizedName = existingRole.RoleName.Trim().ToUpperInvariant(),
-            Description = existingRole.Description,
-            IsActive = isActive,
-            IsSystemRole = existingRole.IsSystemRole,
-            CreatedAt = existingRole.CreatedAt
-        };
+        existingRole.IsActive = isActive;
 
         await _uow.ExecuteInTransactionAsync(async () =>
         {
-            await _repo.UpdateRoleAsync(updatedRole, ct);
+            await _repo.UpdateRoleAsync(existingRole, ct);
         }, ct);
 
-        _logger.LogInformation("Role '{RoleId}' status successfully toggled to Active = {IsActive}.", roleId, isActive);
+        _logger.LogInformation("Role '{RoleId}' status successfully toggled to Active = {IsActive}.", existingRole.Id, isActive);
+
         return ApiResponse<bool>.Success(true, $"Role status successfully updated to {(isActive ? "Active" : "Inactive")}.");
     }
 }

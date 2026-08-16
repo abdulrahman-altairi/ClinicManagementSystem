@@ -3,6 +3,7 @@ using ClinicManagementSystem.Application.DTOs.Auth.Role;
 using ClinicManagementSystem.Application.DTOs.Auth.Sessions;
 using ClinicManagementSystem.Application.DTOs.Auth.UserPermissions;
 using ClinicManagementSystem.Application.DTOs.Auth.UserRole;
+using ClinicManagementSystem.Application.DTOs.Auth.Users;
 using ClinicManagementSystem.Domain.Entities.Auth;
 using ClinicManagementSystem.Domain.Enums;
 
@@ -24,8 +25,9 @@ public interface IIdentityRepository
     Task TrackPasswordHistoryAsync(PasswordHistory history, CancellationToken ct = default);
     Task<List<string>> GetRecentPasswordHashesAsync(Guid userId, int takeLast = 5, CancellationToken ct = default);
 
-    Task<IReadOnlyList<RoleResponseDto>> GetAllRolesAsync(CancellationToken ct = default);
-    Task<RoleResponseDto?> GetRoleByIdAsync(Guid roleId, CancellationToken ct = default);
+    Task<IReadOnlyList<Role>> GetAllRolesAsync(CancellationToken ct = default);
+    Task<(IReadOnlyList<ApplicationUser> Users, Dictionary<Guid, List<string>> UserRoles, int TotalCount)> GetPagedUsersAsync(UserQueryParams queryParams, CancellationToken ct = default);
+    Task<Role?> GetRoleByIdAsync(Guid roleId, CancellationToken ct = default);
     Task<bool> RoleExistsByNameAsync(string normalizedName, CancellationToken ct = default);
     Task<bool> RoleExistsByIdAsync(Guid roleId, CancellationToken ct = default);
     Task CreateRoleAsync(Role request, CancellationToken ct = default);
@@ -33,9 +35,9 @@ public interface IIdentityRepository
     Task<int> GetAssignedUserCountForRoleAsync(Guid roleId, CancellationToken ct = default);
     Task DeleteRoleAsync(Guid roleId, CancellationToken ct = default);
 
-    Task<IReadOnlyList<PermissionResponseDto>> GetAllPermissionsAsync(CancellationToken ct = default);
-    Task<PermissionResponseDto?> GetPermissionByIdAsync(Guid permissionId, CancellationToken ct = default);
-    Task<PermissionResponseDto?> GetPermissionByCodeAsync(string permissionCode, CancellationToken ct = default);
+    Task<IReadOnlyList<Permission>> GetAllPermissionsAsync(CancellationToken ct = default);
+    Task<Permission?> GetPermissionByIdAsync(Guid permissionId, CancellationToken ct = default);
+    Task<Permission?> GetPermissionByCodeAsync(string permissionCode, CancellationToken ct = default);
     Task<bool> PermissionExistsByCodeAsync(string permissionCode, CancellationToken ct = default);
     Task CreatePermissionAsync(Permission request, CancellationToken ct = default);
     Task UpdatePermissionAsync(Permission request, CancellationToken ct = default);

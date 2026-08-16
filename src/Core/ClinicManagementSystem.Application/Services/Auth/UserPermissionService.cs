@@ -108,8 +108,8 @@ public sealed class UserPermissionService : IUserPermissionService
         var userPermission = new UserPermission
         {
             Id = Guid.NewGuid(),
-            UserId = requestDto.UserId,
-            PermissionId = requestDto.PermissionId,
+            UserId = user.Id,
+            PermissionId = permission.Id,
             GrantType = requestDto.GrantType,
             Reason = requestDto.Reason?.Trim(),
             ValidFrom = requestDto.ValidFrom ?? _date.UtcNow,

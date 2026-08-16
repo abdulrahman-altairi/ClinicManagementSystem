@@ -10,6 +10,7 @@ using ClinicManagementSystem.Domain.Entities.Auth;
 using ClinicManagementSystem.Domain.Enums;
 using ClinicManagementSystem.Infrastructure.Persistence.DataMappers;
 using Microsoft.Data.SqlClient;
+using ClinicManagementSystem.Application.DTOs.Auth.Users;
 
 namespace ClinicManagementSystem.Infrastructure.Persistence.Repositories;
 
@@ -59,7 +60,7 @@ public sealed class IdentityRepository : IIdentityRepository
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SingleRow, ct);
     
         return await reader.ReadAsync(ct)
-            ? UserMapper.MapToApplicationUser(reader)
+            ? reader.MapToApplicationUser()
             : null;
     }
 
@@ -114,7 +115,7 @@ public sealed class IdentityRepository : IIdentityRepository
         await using var reader = await cmd.ExecuteReaderAsync(CommandBehavior.SingleRow, ct);
 
         return await reader.ReadAsync(ct)
-            ? UserMapper.MapToApplicationUser(reader)
+            ? reader.MapToApplicationUser()
             : null;
     }
 
@@ -294,70 +295,457 @@ public sealed class IdentityRepository : IIdentityRepository
         return hashes;
     }
 
+    public async Task<(IReadOnlyList<ApplicationUser> Users, Dictionary<Guid, List<string>> UserRoles, int TotalCount)> GetPagedUsersAsync(UserQueryParams queryParams, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_GetPagedUsers", ct, CommandType.StoredProcedure);
+
+        cmd.Parameters.Add(new SqlParameter("@SearchTerm", SqlDbType.NVarChar, 100) { Value = (object?)queryParams.SearchTerm ?? DBNull.Value });
+        cmd.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = (object?)queryParams.IsActive ?? DBNull.Value });
+        cmd.Parameters.Add(new SqlParameter("@SortBy", SqlDbType.VarChar, 50) { Value = (object?)queryParams.SortBy ?? DBNull.Value });
+        cmd.Parameters.Add(new SqlParameter("@IsDescending", SqlDbType.Bit) { Value = queryParams.IsDescending });
+        cmd.Parameters.Add(new SqlParameter("@PageNumber", SqlDbType.Int) { Value = queryParams.PageNumber });
+        cmd.Parameters.Add(new SqlParameter("@PageSize", SqlDbType.Int) { Value = queryParams.PageSize });
+
+        var users = new List<ApplicationUser>();
+        var userRolesMap = new Dictionary<Guid, List<string>>();
+        int totalCount = 0;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        var userOrdinals = new UserDataMapperExtensions.UserOrdinals(reader);
+        int totalCountOrd = reader.GetOrdinal("TotalCount");
+
+        while (await reader.ReadAsync(ct))
+        {
+            if (totalCount == 0)
+            {
+                totalCount = reader.GetInt32(totalCountOrd);
+            }
+
+            var user = reader.MapToApplicationUser(userOrdinals);
+            users.Add(user);
+            userRolesMap[user.Id] = new List<string>();
+        }
+
+        if (await reader.NextResultAsync(ct))
+        {
+            int userIdOrd = reader.GetOrdinal("UserId");
+            int roleNameOrd = reader.GetOrdinal("RoleName");
+
+            while (await reader.ReadAsync(ct))
+            {
+                var userId = reader.GetGuid(userIdOrd);
+                var roleName = reader.GetString(roleNameOrd);
+
+                if (userRolesMap.TryGetValue(userId, out var roleList))
+                {
+                    roleList.Add(roleName);
+                }
+            }
+        }
+
+        return (users.AsReadOnly(), userRolesMap, totalCount);
+    }
+
     // ════════════════════════════════════════════════════════════════════════
     //  ROLES MANAGEMENT
     // ════════════════════════════════════════════════════════════════════════
 
-    public Task<IReadOnlyList<RoleResponseDto>> GetAllRolesAsync(CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<RoleResponseDto>>(Array.Empty<RoleResponseDto>());
+    public async Task<IReadOnlyList<Role>> GetAllRolesAsync(CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_GetAllRoles", ct, CommandType.StoredProcedure);
 
-    public Task<RoleResponseDto?> GetRoleByIdAsync(Guid roleId, CancellationToken ct = default)
-        => Task.FromResult<RoleResponseDto?>(null);
+        var roles = new List<Role>();
 
-    public Task<bool> RoleExistsByNameAsync(string normalizedName, CancellationToken ct = default)
-        => Task.FromResult(false);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-    public Task<bool> RoleExistsByIdAsync(Guid roleId, CancellationToken ct = default)
-        => Task.FromResult(false);
+        var ordinals = new RoleMapper.RoleOrdinals(reader);
 
-    public Task CreateRoleAsync(Role request, CancellationToken ct = default)
-        => Task.CompletedTask;
+        while (await reader.ReadAsync(ct))
+        {
+            roles.Add(RoleMapper.MapToEntity(reader, ordinals));
+        }
 
-    public Task UpdateRoleAsync(Role request, CancellationToken ct = default)
-        => Task.CompletedTask;
+        return roles.AsReadOnly();
+    }
 
-    public Task<int> GetAssignedUserCountForRoleAsync(Guid roleId, CancellationToken ct = default)
-        => Task.FromResult(0);
+    public async Task<Role?> GetRoleByIdAsync(Guid roleId, CancellationToken ct = default)
+    {
+        if (roleId == Guid.Empty)
+            return null;
 
-    public Task DeleteRoleAsync(Guid roleId, CancellationToken ct = default)
-        => Task.CompletedTask;
+        await using var cmd = await CreateCommandAsync("auth.sp_GetRoleById", ct, CommandType.StoredProcedure);
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
 
-    public Task<(List<Role> Roles, int TotalCount)> SearchRolesAsync(RoleSearchFilter filter, CancellationToken ct = default)
-        => Task.FromResult((new List<Role>(), 0));
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-    public Task<List<Role>> GetSystemRolesAsync(CancellationToken ct = default)
-        => Task.FromResult(new List<Role>());
+        if (!await reader.ReadAsync(ct))
+            return null;
+
+        return RoleMapper.MapToEntity(reader);
+    }
+
+    public async Task<bool> RoleExistsByNameAsync(string normalizedName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(normalizedName))
+            return false;
+
+        await using var cmd = await CreateCommandAsync("auth.sp_RoleExistsByName", ct);
+        cmd.Parameters.Add(new SqlParameter("@NormalizedName", SqlDbType.NVarChar, 100) 
+        { 
+            Value = normalizedName 
+        });
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+
+        return result is not null && Convert.ToBoolean(result);
+    }
+
+    public async Task<bool> RoleExistsByIdAsync(Guid roleId, CancellationToken ct = default)
+    {
+        if (roleId == Guid.Empty)
+            return false;
+
+        await using var cmd = await CreateCommandAsync("auth.sp_RoleExistsById", ct);
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) 
+        { 
+            Value = roleId 
+        });
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+
+        return result is not null && Convert.ToBoolean(result);
+    }
+
+    public async Task CreateRoleAsync(Role request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.Id == Guid.Empty)
+        {
+            request.Id = Guid.NewGuid();
+        }
+
+        await using var cmd = await CreateCommandAsync("auth.sp_CreateRole", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = request.Id });
+        cmd.Parameters.Add(new SqlParameter("@RoleName", SqlDbType.NVarChar, 100) { Value = request.RoleName });
+        cmd.Parameters.Add(new SqlParameter("@NormalizedName", SqlDbType.NVarChar, 100) { Value = request.NormalizedName });
+        cmd.Parameters.Add(new SqlParameter("@Description", SqlDbType.NVarChar, 500) 
+        { 
+            Value = (object?)request.Description ?? DBNull.Value 
+        });
+        cmd.Parameters.Add(new SqlParameter("@IsSystemRole", SqlDbType.Bit) { Value = request.IsSystemRole });
+        cmd.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = request.IsActive });
+        cmd.Parameters.Add(new SqlParameter("@CreatedBy", SqlDbType.UniqueIdentifier) 
+        { 
+            Value = (object?)request.CreatedBy ?? DBNull.Value 
+        });
+
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task UpdateRoleAsync(Role request, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+    
+        if (request.Id == Guid.Empty)
+            throw new ArgumentException("Role ID cannot be empty.", nameof(request));
+    
+        await using var cmd = await CreateCommandAsync("auth.sp_UpdateRole", ct);
+    
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = request.Id });
+        cmd.Parameters.Add(new SqlParameter("@RoleName", SqlDbType.NVarChar, 100) { Value = request.RoleName });
+        cmd.Parameters.Add(new SqlParameter("@NormalizedName", SqlDbType.NVarChar, 100) { Value = request.NormalizedName });
+        cmd.Parameters.Add(new SqlParameter("@Description", SqlDbType.NVarChar, 500) 
+        { 
+            Value = (object?)request.Description ?? DBNull.Value 
+        });
+        cmd.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = request.IsActive });
+        cmd.Parameters.Add(new SqlParameter("@UpdatedBy", SqlDbType.UniqueIdentifier) 
+        { 
+            Value = (object?)request.UpdatedBy ?? DBNull.Value 
+        });
+    
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<int> GetAssignedUserCountForRoleAsync(Guid roleId, CancellationToken ct = default)
+    {
+        if (roleId == Guid.Empty)
+            return 0;
+
+        await using var cmd = await CreateCommandAsync("auth.sp_GetAssignedUserCountForRole", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+
+        return result is null or DBNull ? 0 : Convert.ToInt32(result);
+    }
+
+    public async Task DeleteRoleAsync(Guid roleId, CancellationToken ct = default)
+    {
+        if (roleId == Guid.Empty)
+            throw new ArgumentException("Role ID cannot be empty.", nameof(roleId));
+    
+        await using var cmd = await CreateCommandAsync("auth.sp_DeleteRole", ct);
+    
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
+    
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<(List<Role> Roles, int TotalCount)> SearchRolesAsync(RoleSearchFilter filter, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(filter);
+
+        await using var cmd = await CreateCommandAsync("auth.sp_SearchRoles", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@SearchTerm", SqlDbType.NVarChar, 100) 
+        { 
+            Value = string.IsNullOrWhiteSpace(filter.SearchTerm) ? DBNull.Value : filter.SearchTerm.Trim() 
+        });
+        cmd.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) 
+        { 
+            Value = (object?)filter.IsActive ?? DBNull.Value 
+        });
+        cmd.Parameters.Add(new SqlParameter("@IsSystemRole", SqlDbType.Bit) 
+        { 
+            Value = (object?)filter.IsSystem ?? DBNull.Value 
+        });
+        cmd.Parameters.Add(new SqlParameter("@PageNumber", SqlDbType.Int) { Value = filter.PageNumber < 1 ? 1 : filter.PageNumber });
+        cmd.Parameters.Add(new SqlParameter("@PageSize", SqlDbType.Int) { Value = filter.PageSize < 1 ? 10 : filter.PageSize });
+        cmd.Parameters.Add(new SqlParameter("@SortBy", SqlDbType.NVarChar, 50) 
+        { 
+            Value = string.IsNullOrWhiteSpace(filter.SortBy) ? "CreatedAt" : filter.SortBy 
+        });
+        cmd.Parameters.Add(new SqlParameter("@SortDirection", SqlDbType.NVarChar, 4) 
+        { 
+            Value = string.IsNullOrWhiteSpace(filter.SortDirection) ? "DESC" : filter.SortDirection.ToUpperInvariant() 
+        });
+
+        var roles = new List<Role>();
+        var totalCount = 0;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        var ordinals = new RoleMapper.RoleOrdinals(reader);
+        var totalCountOrd = reader.GetOrdinal("TotalCount");
+
+        while (await reader.ReadAsync(ct))
+        {
+
+            if (totalCount == 0 && !reader.IsDBNull(totalCountOrd))
+            {
+                totalCount = reader.GetInt32(totalCountOrd);
+            }
+
+            roles.Add(RoleMapper.MapToEntity(reader, ordinals));
+        }
+        return (roles, totalCount);
+    }
+
+    public async Task<List<Role>> GetSystemRolesAsync(CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_GetSystemRoles", ct);
+
+        var roles = new List<Role>();
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        var ordinals = new RoleMapper.RoleOrdinals(reader);
+
+        while (await reader.ReadAsync(ct))
+        {
+            roles.Add(RoleMapper.MapToEntity(reader, ordinals));
+        }
+
+        return roles;
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     //  PERMISSIONS MANAGEMENT
     // ════════════════════════════════════════════════════════════════════════
 
-    public Task<IReadOnlyList<PermissionResponseDto>> GetAllPermissionsAsync(CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<PermissionResponseDto>>(Array.Empty<PermissionResponseDto>());
+    public async Task<IReadOnlyList<Permission>> GetAllPermissionsAsync(CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_GetAllPermissions", ct);
 
-    public Task<PermissionResponseDto?> GetPermissionByIdAsync(Guid permissionId, CancellationToken ct = default)
-        => Task.FromResult<PermissionResponseDto?>(null);
+        var permissions = new List<Permission>();
 
-    public Task<PermissionResponseDto?> GetPermissionByCodeAsync(string permissionCode, CancellationToken ct = default)
-        => Task.FromResult<PermissionResponseDto?>(null);
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
 
-    public Task<bool> PermissionExistsByCodeAsync(string permissionCode, CancellationToken ct = default)
-        => Task.FromResult(false);
 
-    public Task CreatePermissionAsync(Permission request, CancellationToken ct = default)
-        => Task.CompletedTask;
+        var ordinals = new PermissionDataMapperExtensions.PermissionOrdinals(reader);
 
-    public Task UpdatePermissionAsync(Permission request, CancellationToken ct = default)
-        => Task.CompletedTask;
+        while (await reader.ReadAsync(ct))
+        {
+            permissions.Add(reader.MapToPermission(ordinals));
+        }
 
-    public Task DeletePermissionAsync(Guid permissionId, CancellationToken ct = default)
-        => Task.CompletedTask;
+        return permissions;
+    }
+    
+    public async Task<Permission?> GetPermissionByIdAsync(Guid permissionId, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_GetPermissionById", ct);
 
-    public Task<int> GetAssignedRoleCountForPermissionAsync(Guid permissionId, CancellationToken ct = default)
-        => Task.FromResult(0);
+        cmd.Parameters.Add(new SqlParameter("@PermissionId", SqlDbType.UniqueIdentifier) { Value = permissionId });
 
-    public Task<(List<Permission> Permissions, int TotalCount)> SearchPermissionsAsync(PermissionSearchFilter filter, CancellationToken ct = default)
-        => Task.FromResult((new List<Permission>(), 0));
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        if (await reader.ReadAsync(ct))
+        {
+            return reader.MapToPermission();
+        }
+
+        return null;
+    }
+
+    public async Task<Permission?> GetPermissionByCodeAsync(string permissionCode, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_GetPermissionByCode", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@PermissionCode", SqlDbType.NVarChar, 100) { Value = permissionCode });
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        if (await reader.ReadAsync(ct))
+        {
+            return reader.MapToPermission();
+        }
+
+        return null;
+    }
+
+    public async Task<bool> PermissionExistsByCodeAsync(string permissionCode, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_PermissionExistsByCode", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@PermissionCode", SqlDbType.NVarChar, 100) { Value = permissionCode });
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+
+        return result is not null && Convert.ToBoolean(result);
+    }
+
+    public async Task CreatePermissionAsync(Permission request, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_CreatePermission", ct);
+
+        var idParam = new SqlParameter("@PermissionId", SqlDbType.UniqueIdentifier)
+        {
+            Direction = ParameterDirection.InputOutput,
+            Value = request.Id == Guid.Empty ? DBNull.Value : request.Id
+        };
+        cmd.Parameters.Add(idParam);
+
+        cmd.Parameters.Add(new SqlParameter("@PermissionCode", SqlDbType.NVarChar, 100) { Value = request.PermissionCode });
+        cmd.Parameters.Add(new SqlParameter("@PermissionName", SqlDbType.NVarChar, 100) { Value = request.PermissionName });
+        cmd.Parameters.Add(new SqlParameter("@Module", SqlDbType.NVarChar, 50) { Value = request.Module });
+        cmd.Parameters.Add(new SqlParameter("@Description", SqlDbType.NVarChar, 500) 
+        { 
+            Value = string.IsNullOrWhiteSpace(request.Description) ? DBNull.Value : request.Description 
+        });
+        cmd.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = request.IsActive });
+        cmd.Parameters.Add(new SqlParameter("@CreatedBy", SqlDbType.UniqueIdentifier) 
+        { 
+            Value = (object?)request.CreatedBy ?? DBNull.Value 
+        });
+
+        await cmd.ExecuteNonQueryAsync(ct);
+
+        if (idParam.Value != DBNull.Value && idParam.Value is Guid generatedId)
+        {
+            request.Id = generatedId;
+        }
+    }
+
+    public async Task UpdatePermissionAsync(Permission request, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_UpdatePermission", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@PermissionId", SqlDbType.UniqueIdentifier) { Value = request.Id });
+        cmd.Parameters.Add(new SqlParameter("@PermissionName", SqlDbType.NVarChar, 100) { Value = request.PermissionName });
+        cmd.Parameters.Add(new SqlParameter("@Module", SqlDbType.NVarChar, 50) { Value = request.Module });
+        cmd.Parameters.Add(new SqlParameter("@Description", SqlDbType.NVarChar, 500) 
+        { 
+            Value = string.IsNullOrWhiteSpace(request.Description) ? DBNull.Value : request.Description 
+        });
+        cmd.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) { Value = request.IsActive });
+        cmd.Parameters.Add(new SqlParameter("@UpdatedBy", SqlDbType.UniqueIdentifier) 
+        { 
+            Value = (object?)request.UpdatedBy ?? DBNull.Value 
+        });
+
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task DeletePermissionAsync(Guid permissionId, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_DeletePermission", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@PermissionId", SqlDbType.UniqueIdentifier) { Value = permissionId });
+        cmd.Parameters.Add(new SqlParameter("@UpdatedBy", SqlDbType.UniqueIdentifier) { Value = DBNull.Value });
+
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task<int> GetAssignedRoleCountForPermissionAsync(Guid permissionId, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_GetAssignedRoleCountForPermission", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@PermissionId", SqlDbType.UniqueIdentifier) { Value = permissionId });
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+
+        return result is not null && result != DBNull.Value
+            ? Convert.ToInt32(result)
+            : 0;
+    }
+
+    public async Task<(List<Permission> Permissions, int TotalCount)> SearchPermissionsAsync(PermissionSearchFilter filter, CancellationToken ct = default)
+    {
+        await using var cmd = await CreateCommandAsync("auth.sp_SearchPermissions", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@SearchTerm", SqlDbType.NVarChar, 100) 
+        { 
+            Value = string.IsNullOrWhiteSpace(filter.SearchTerm) ? DBNull.Value : filter.SearchTerm.Trim() 
+        });
+        cmd.Parameters.Add(new SqlParameter("@Module", SqlDbType.NVarChar, 50) 
+        { 
+            Value = string.IsNullOrWhiteSpace(filter.Module) ? DBNull.Value : filter.Module.Trim() 
+        });
+        cmd.Parameters.Add(new SqlParameter("@IsActive", SqlDbType.Bit) 
+        { 
+            Value = (object?)filter.IsActive ?? DBNull.Value 
+        });
+        cmd.Parameters.Add(new SqlParameter("@PageNumber", SqlDbType.Int) { Value = filter.PageNumber < 1 ? 1 : filter.PageNumber });
+        cmd.Parameters.Add(new SqlParameter("@PageSize", SqlDbType.Int) { Value = filter.PageSize < 1 ? 10 : filter.PageSize });
+
+        var permissions = new List<Permission>();
+        int totalCount = 0;
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+        if (await reader.ReadAsync(ct))
+        {
+            totalCount = reader.GetInt32(0);
+        }
+
+        if (await reader.NextResultAsync(ct))
+        {
+            var ordinals = new PermissionDataMapperExtensions.PermissionOrdinals(reader);
+
+            while (await reader.ReadAsync(ct))
+            {
+                permissions.Add(reader.MapToPermission(ordinals));
+            }
+        }
+
+        return (permissions, totalCount);
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     //  ROLE - PERMISSIONS
