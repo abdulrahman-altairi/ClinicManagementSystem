@@ -216,12 +216,15 @@ public sealed class UserPermissionService : IUserPermissionService
 
         var distinctPermissionIds = requestDto.Overrides.Select(o => o.PermissionId).Distinct().ToList();
 
-        var existingPermissions = await _repo.GetPermissionsByIdsAsync(distinctPermissionIds, ct);
-        if (existingPermissions.Count != distinctPermissionIds.Count)
+        if (distinctPermissionIds.Any())
         {
-            return ApiResponse<bool>.Failure(
-                "One or more permission IDs are invalid or non-existent.",
-                PermissionErrors.PermissionNotFound);
+            var existingPermissions = await _repo.GetPermissionsByIdsAsync(distinctPermissionIds, ct);
+            if (existingPermissions.Count != distinctPermissionIds.Count)
+            {
+                return ApiResponse<bool>.Failure(
+                    "One or more permission IDs are invalid or non-existent.",
+                    PermissionErrors.PermissionNotFound);
+            }
         }
 
         var permissionsToSet = requestDto.Overrides.Select(o => new UserPermission

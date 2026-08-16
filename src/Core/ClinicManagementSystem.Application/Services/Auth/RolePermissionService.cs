@@ -2,6 +2,7 @@
 using ClinicManagementSystem.Application.Common.Interfaces;
 using ClinicManagementSystem.Application.Common.Models;
 using ClinicManagementSystem.Application.DTOs.Auth.AssignPermissions;
+using ClinicManagementSystem.Application.DTOs.Auth.Permissions;
 using ClinicManagementSystem.Application.Interfaces.Repositories;
 using ClinicManagementSystem.Application.Interfaces.Services.Auth;
 using ClinicManagementSystem.Domain.Entities.Auth;
@@ -54,11 +55,21 @@ public sealed class RolePermissionService : IRolePermissionService
 
         var permissions = await _repo.GetPermissionsByRoleIdAsync(roleId, ct);
 
+        var permissionDtos = permissions.Select(p => new PermissionResponseDto
+        {
+            PermissionId = p.Id,
+            PermissionCode = p.PermissionCode,
+            PermissionName = p.PermissionName,
+            Module = p.Module,
+            Description = p.Description,
+            IsActive = p.IsActive
+        }).ToList();
+
         var response = new RolePermissionsDetailsResponseDto
         {
             RoleId = role.Id,
             RoleName = role.RoleName,
-            AssignedPermissions = permissions
+            AssignedPermissions = permissionDtos
         };
 
         return ApiResponse<RolePermissionsDetailsResponseDto>.Success(response, "Role permissions retrieved successfully.");
@@ -114,8 +125,11 @@ public sealed class RolePermissionService : IRolePermissionService
         await _uow.ExecuteInTransactionAsync(async () =>
         {
             await _repo.RemoveAllPermissionsFromRoleAsync(requestDto.RoleId, ct);
-            
-            await _repo.AssignPermissionsToRoleAsync(requestDto.RoleId, rolePermissions, ct);
+
+            if (rolePermissions.Any())
+            {
+                await _repo.AssignPermissionsToRoleAsync(requestDto.RoleId, rolePermissions, ct);
+            }
         }, ct);
         
         _logger.LogInformation("Successfully assigned {Count} permissions to Role '{RoleId}'.", distinctPermissionIds.Count, requestDto.RoleId);

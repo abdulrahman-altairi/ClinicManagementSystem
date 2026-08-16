@@ -44,8 +44,8 @@ public interface IIdentityRepository
     Task DeletePermissionAsync(Guid permissionId, CancellationToken ct = default);
     Task<int> GetAssignedRoleCountForPermissionAsync(Guid permissionId, CancellationToken ct = default);
 
-    Task<IReadOnlyList<PermissionResponseDto>> GetPermissionsByRoleIdAsync(Guid roleId, CancellationToken ct = default);
-    Task<IReadOnlyList<PermissionResponseDto>> GetPermissionsByIdsAsync(IEnumerable<Guid> permissionIds, CancellationToken ct = default);
+    Task<IReadOnlyList<Permission>> GetPermissionsByRoleIdAsync(Guid roleId, CancellationToken ct = default);
+    Task<IReadOnlyList<Permission>> GetPermissionsByIdsAsync(IEnumerable<Guid> permissionIds, CancellationToken ct = default);
     Task<bool> RoleHasPermissionAsync(Guid roleId, Guid permissionId, CancellationToken ct = default);
     Task<bool> RoleHasPermissionByCodeAsync(Guid roleId, string permissionCode, CancellationToken ct = default);
     Task AddPermissionToRoleAsync(RolePermission rolePermission, CancellationToken ct = default);

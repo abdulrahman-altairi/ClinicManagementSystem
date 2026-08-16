@@ -751,29 +751,172 @@ public sealed class IdentityRepository : IIdentityRepository
     //  ROLE - PERMISSIONS
     // ════════════════════════════════════════════════════════════════════════
 
-    public Task<IReadOnlyList<PermissionResponseDto>> GetPermissionsByRoleIdAsync(Guid roleId, CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<PermissionResponseDto>>(Array.Empty<PermissionResponseDto>());
+    public async Task<IReadOnlyList<Permission>> GetPermissionsByRoleIdAsync(Guid roleId, CancellationToken ct = default)
+    {
+        using var cmd = await CreateCommandAsync("auth.sp_GetPermissionsByRoleId", ct);
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
 
-    public Task<IReadOnlyList<PermissionResponseDto>> GetPermissionsByIdsAsync(IEnumerable<Guid> permissionIds, CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<PermissionResponseDto>>(Array.Empty<PermissionResponseDto>());
+        var permissions = new List<Permission>();
 
-    public Task<bool> RoleHasPermissionAsync(Guid roleId, Guid permissionId, CancellationToken ct = default)
-        => Task.FromResult(false);
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (reader.HasRows)
+        {
+            var ordinals = new PermissionDataMapperExtensions.PermissionOrdinals(reader);
 
-    public Task<bool> RoleHasPermissionByCodeAsync(Guid roleId, string permissionCode, CancellationToken ct = default)
-        => Task.FromResult(false);
+            while (await reader.ReadAsync(ct))
+            {
+                permissions.Add(reader.MapToPermission(ordinals));
+            }
+        }
 
-    public Task AddPermissionToRoleAsync(RolePermission rolePermission, CancellationToken ct = default)
-        => Task.CompletedTask;
+        return permissions;
+    }
 
-    public Task RemovePermissionFromRoleAsync(Guid roleId, Guid permissionId, CancellationToken ct = default)
-        => Task.CompletedTask;
+    public async Task<IReadOnlyList<Permission>> GetPermissionsByIdsAsync(IEnumerable<Guid> permissionIds, CancellationToken ct = default)
+    {
+        var idsList = permissionIds.Distinct().ToList();
+        if (!idsList.Any())
+        {
+            return Array.Empty<Permission>();
+        }
 
-    public Task RemoveAllPermissionsFromRoleAsync(Guid roleId, CancellationToken ct = default)
-        => Task.CompletedTask;
+        using var cmd = await CreateCommandAsync("auth.sp_GetPermissionsByIds", ct);
 
-    public Task AssignPermissionsToRoleAsync(Guid roleId, IEnumerable<RolePermission> rolePermissions, CancellationToken ct = default)
-        => Task.CompletedTask;
+        var tvpRecords = idsList.Select(id =>
+        {
+            var record = new Microsoft.Data.SqlClient.Server.SqlDataRecord(
+                new Microsoft.Data.SqlClient.Server.SqlMetaData("Id", SqlDbType.UniqueIdentifier));
+            record.SetGuid(0, id);
+            return record;
+        });
+
+        var tvpParam = cmd.Parameters.Add(new SqlParameter("@PermissionIds", SqlDbType.Structured)
+        {
+            TypeName = "dbo.GuidListType",
+            Value = tvpRecords
+        });
+
+        var permissions = new List<Permission>(idsList.Count);
+
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (reader.HasRows)
+        {
+            var ordinals = new PermissionDataMapperExtensions.PermissionOrdinals(reader);
+
+            while (await reader.ReadAsync(ct))
+            {
+                permissions.Add(reader.MapToPermission(ordinals));
+            }
+        }
+
+        return permissions;
+    }
+
+    public async Task<bool> RoleHasPermissionAsync(Guid roleId, Guid permissionId, CancellationToken ct = default)
+    {
+        using var cmd = await CreateCommandAsync("auth.sp_RoleHasPermission", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
+        cmd.Parameters.Add(new SqlParameter("@PermissionId", SqlDbType.UniqueIdentifier) { Value = permissionId });
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+
+        return result != null && result != DBNull.Value && Convert.ToBoolean(result);
+    }
+
+    public async Task<bool> RoleHasPermissionByCodeAsync(Guid roleId, string permissionCode, CancellationToken ct = default)
+    {
+        using var cmd = await CreateCommandAsync("auth.sp_RoleHasPermissionByCode", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
+        cmd.Parameters.Add(new SqlParameter("@PermissionCode", SqlDbType.NVarChar, 150) { Value = permissionCode });
+
+        var result = await cmd.ExecuteScalarAsync(ct);
+
+        return result != null && result != DBNull.Value && Convert.ToBoolean(result);
+    }
+
+    public async Task AddPermissionToRoleAsync(RolePermission rolePermission, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(rolePermission);
+
+        using var cmd = await CreateCommandAsync("auth.sp_AddPermissionToRole", ct);
+
+        if (rolePermission.Id == Guid.Empty)
+        {
+            rolePermission.Id = Guid.NewGuid();
+        }
+
+        cmd.Parameters.Add(new SqlParameter("@RolePermissionId", SqlDbType.UniqueIdentifier) { Value = rolePermission.Id });
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = rolePermission.RoleId });
+        cmd.Parameters.Add(new SqlParameter("@PermissionId", SqlDbType.UniqueIdentifier) { Value = rolePermission.PermissionId });
+        cmd.Parameters.Add(new SqlParameter("@CreatedBy", SqlDbType.UniqueIdentifier) 
+        { 
+            Value = (object?)rolePermission.CreatedBy ?? DBNull.Value 
+        });
+
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task RemovePermissionFromRoleAsync(Guid roleId, Guid permissionId, CancellationToken ct = default)
+    {
+        if (roleId == Guid.Empty)
+            throw new ArgumentException("Role ID cannot be empty.", nameof(roleId));
+
+        if (permissionId == Guid.Empty)
+            throw new ArgumentException("Permission ID cannot be empty.", nameof(permissionId));
+
+        using var cmd = await CreateCommandAsync("auth.sp_RemovePermissionFromRole", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
+        cmd.Parameters.Add(new SqlParameter("@PermissionId", SqlDbType.UniqueIdentifier) { Value = permissionId });
+
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task RemoveAllPermissionsFromRoleAsync(Guid roleId, CancellationToken ct = default)
+    {
+        if (roleId == Guid.Empty)
+            throw new ArgumentException("Role ID cannot be empty.", nameof(roleId));
+
+        using var cmd = await CreateCommandAsync("auth.sp_RemoveAllPermissionsFromRole", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
+
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    public async Task AssignPermissionsToRoleAsync(Guid roleId, IEnumerable<RolePermission> rolePermissions, CancellationToken ct = default)
+    {
+        if (roleId == Guid.Empty)
+            throw new ArgumentException("Role ID cannot be empty.", nameof(roleId));
+
+        var permissionsList = rolePermissions?.ToList();
+        if (permissionsList == null || !permissionsList.Any())
+            return;
+
+        using var tvpTable = new DataTable();
+        tvpTable.Columns.Add("PermissionId", typeof(Guid));
+        tvpTable.Columns.Add("CreatedBy", typeof(Guid));
+
+        foreach (var item in permissionsList)
+        {
+            tvpTable.Rows.Add(
+                item.PermissionId, 
+                item.CreatedBy.HasValue ? item.CreatedBy.Value : DBNull.Value
+            );
+        }
+
+        using var cmd = await CreateCommandAsync("auth.sp_AssignPermissionsToRole", ct);
+
+        cmd.Parameters.Add(new SqlParameter("@RoleId", SqlDbType.UniqueIdentifier) { Value = roleId });
+
+        var tvpParam = cmd.Parameters.AddWithValue("@Permissions", tvpTable);
+        tvpParam.SqlDbType = SqlDbType.Structured;
+        tvpParam.TypeName = "auth.UDT_RolePermissionsInput";
+
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
 
     // ════════════════════════════════════════════════════════════════════════
     //  USER - ROLES
