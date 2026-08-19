@@ -931,7 +931,7 @@ public sealed class IdentityRepository : IIdentityRepository
 
         var tvpParam = cmd.Parameters.Add(new SqlParameter("@Permissions", SqlDbType.Structured)
         {
-            TypeName = "auth.UDT_RolePermissionsInput",
+            TypeName = "auth._RolePermissionsInput",
             Value = tvpRecords
         });
 
