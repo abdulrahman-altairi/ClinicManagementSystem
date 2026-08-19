@@ -283,7 +283,8 @@ public sealed class UserPermissionService : IUserPermissionService
         }
 
         var userRoles = await _repo.GetRolesByUserIdAsync(userId, ct);
-        var activeRoleIds = userRoles.Where(r => r.IsActive).Select(r => r.RoleId).ToList();
+        var now = _date.UtcNow;
+        var activeRoleIds = userRoles.Where(r => r.IsActive(now)).Select(r => r.RoleId).ToList();
 
         if (activeRoleIds.Any())
         {
@@ -295,5 +296,31 @@ public sealed class UserPermissionService : IUserPermissionService
         }
 
         return ApiResponse<bool>.Success(false, "Permission not granted.");
+    }
+
+    public async Task<ApiResponse<List<string>>> GetEffectivePermissionsForUserAsync(Guid userId, CancellationToken ct = default)
+    {
+        if (userId == Guid.Empty)
+        {
+            return ApiResponse<List<string>>.Failure(
+                "Invalid user identifier.",
+                UserErrors.InvalidUserId);
+        }
+
+        var user = await _repo.GetUserByIdAsync(userId, ct);
+        if (user is null)
+        {
+            return ApiResponse<List<string>>.Failure(
+                "User not found.",
+                UserErrors.UserNotFound);
+        }
+
+        var effectivePermissions = await _repo.GetEffectivePermissionsByUserIdAsync(userId, ct);
+
+        _logger.LogInformation("Retrieved {Count} effective permissions for User '{UserId}'.", effectivePermissions.Count, userId);
+
+        return ApiResponse<List<string>>.Success(
+            effectivePermissions, 
+            "Effective permissions retrieved successfully.");
     }
 }

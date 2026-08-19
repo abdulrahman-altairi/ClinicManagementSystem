@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using ClinicManagementSystem.Application.Common.Interfaces;
 using ClinicManagementSystem.Application.Common.Models;
+using ClinicManagementSystem.Application.Common.Options;
 using ClinicManagementSystem.Application.DTOs.Auth.ResetPassword;
 using ClinicManagementSystem.Application.Interfaces.Repositories;
 using ClinicManagementSystem.Application.Interfaces.Services.Auth;
@@ -8,6 +9,7 @@ using ClinicManagementSystem.Domain.Entities.Auth;
 using ClinicManagementSystem.Domain.Enums;
 using FluentValidation;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace ClinicManagementSystem.Application.Services.Auth;
 
@@ -19,6 +21,7 @@ public sealed class PasswordResetService : IPasswordResetService
     private readonly IEmailService _email;
     private readonly ICurrentUserService _currentUser;
     private readonly IHasher _hasher;
+    private readonly AuthOptions _options;
     private readonly IDateTimeProvider _date;
     private readonly ILogger<PasswordResetService> _logger;
     private readonly IValidator<ForgotPasswordRequestDto> _forgotPasswordValidator;
@@ -31,6 +34,7 @@ public sealed class PasswordResetService : IPasswordResetService
         IEmailService email,
         ICurrentUserService currentUser,
         IHasher hasher,
+        AuthOptions options,
         IDateTimeProvider date,
         ILogger<PasswordResetService> logger,
         IValidator<ForgotPasswordRequestDto> forgotPasswordValidatoe,
@@ -42,6 +46,7 @@ public sealed class PasswordResetService : IPasswordResetService
         _email = email;
         _currentUser = currentUser;
         _hasher = hasher;
+        _options = options;
         _date = date;
         _logger = logger;
         _forgotPasswordValidator = forgotPasswordValidatoe;
@@ -49,8 +54,7 @@ public sealed class PasswordResetService : IPasswordResetService
     }
 
 
-    public async Task<ApiResponse<bool>> ForgotPasswordAsync(
-        ForgotPasswordRequestDto request, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> ForgotPasswordAsync(ForgotPasswordRequestDto request, CancellationToken ct = default)
     {
         var validation = await _forgotPasswordValidator.ValidateAsync(request, ct);
         if (!validation.IsValid)
@@ -97,9 +101,7 @@ public sealed class PasswordResetService : IPasswordResetService
         return ApiResponse<bool>.Success(true, "If your email is registered, a password reset link has been sent.");
     }
 
-
-     public async Task<ApiResponse<bool>> ValidateResetTokenAsync(
-        string token, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> ValidateResetTokenAsync(string token, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(token))
         {
@@ -119,8 +121,7 @@ public sealed class PasswordResetService : IPasswordResetService
         return ApiResponse<bool>.Success(true, "Reset token is valid.");
     }
 
-    public async Task<ApiResponse<bool>> ResetPasswordAsync(
-        ResetPasswordRequestDto request, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> ResetPasswordAsync(ResetPasswordRequestDto request, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(request.Token) || string.IsNullOrWhiteSpace(request.NewPassword))
         {
@@ -143,7 +144,7 @@ public sealed class PasswordResetService : IPasswordResetService
             return ApiResponse<bool>.Failure("User not found.", ErrorModel.Global("User not found.", "USER_NOT_FOUND"));
         }
 
-        var recentHashes = await _repo.GetRecentPasswordHashesAsync(user.Id, takeLast: 5, ct);
+        var recentHashes = await _repo.GetRecentPasswordHashesAsync(user.Id, takeLast: _options.PasswordHistoryDepth, ct);
         foreach (var oldHash in recentHashes)
         {
             if (_hasher.VerifyPassword(request.NewPassword, oldHash, user.PasswordSalt))
@@ -159,6 +160,7 @@ public sealed class PasswordResetService : IPasswordResetService
         var combinedPasswordHistory = $"{salt}:{hash}";
         var passwordHistory = new PasswordHistory
             {
+                Id = Guid.NewGuid(),
                 UserId = user.Id,
                 PasswordHash = combinedPasswordHistory,
                 ChangedAtUtc = now,
@@ -177,9 +179,7 @@ public sealed class PasswordResetService : IPasswordResetService
         return ApiResponse<bool>.Success(true, "Password has been successfully reset. Please log in with your new password.");
     }
 
-
-    public async Task<ApiResponse<bool>> ConfirmEmailAsync(
-        ConfirmEmailRequestDto request, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> ConfirmEmailAsync(ConfirmEmailRequestDto request, CancellationToken ct = default)
     {
         var validation = await _confirmEmailValidator.ValidateAsync(request, ct);
         if (!validation.IsValid)
@@ -220,9 +220,7 @@ public sealed class PasswordResetService : IPasswordResetService
         return ApiResponse<bool>.Success(true, "Email address confirmed successfully.");
     }
 
-
-    public async Task<ApiResponse<bool>> ResendEmailConfirmationAsync(
-        string email, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> ResendEmailConfirmationAsync(string email, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(email))
         {

@@ -256,7 +256,7 @@ public sealed class PermissionService : IPermissionService
         }
 
 
-        await _repo.DeletePermissionAsync(permissionId, ct);
+        await _repo.DeletePermissionAsync(permissionId, _currentUser.UserId, ct);
 
         _logger.LogInformation("Permission '{PermissionId}' deleted successfully.", permissionId);
         return ApiResponse<bool>.Success(true, "Permission deleted successfully.");

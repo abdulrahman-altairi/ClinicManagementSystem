@@ -81,6 +81,11 @@ public sealed class AuthServices : IAuthServices
             return ApiResponse<Guid>.Failure("Username already exists.", AuthErrors.UsernameAlreadyTaken);
         }
 
+        if (await _repo.IsPhoneNumberTakenAsync(requestDto.PhoneNumber!, ct))
+        {
+            return ApiResponse<Guid>.Failure("PhoneNumber already exists.", AuthErrors.PhoneNumber);
+        }
+
         var (hash, salt) = _hasher.HashPassword(requestDto.Password);
         var now = _date.UtcNow;
 
@@ -93,11 +98,12 @@ public sealed class AuthServices : IAuthServices
             NormalizedEmail = requestDto.Email.ToUpperInvariant(),
             Username = requestDto.Username,
             NormalizedUsername = requestDto.Username.ToUpperInvariant(),
+            PhoneNumber = requestDto.PhoneNumber,
             PasswordHash = hash,
             PasswordSalt = salt,
             CreatedAt = now,
-            UpdatedAt = now,
-            PhoneNumber = requestDto.PhoneNumber,
+            CreatedBy = _currentUser.UserId,
+            // UpdatedAt = now,
         };
 
         await _uow.ExecuteInTransactionAsync(async () =>
@@ -110,28 +116,18 @@ public sealed class AuthServices : IAuthServices
 
                 if (role is not null)
                 {
-                    var roleAssignments = new List<UserRoleAssignmentDto>
-                {
-                    new UserRoleAssignmentDto
-                    {
-                        RoleId = role.RoleId,
-                        ValidFrom = now,
-                        ValidTo = null 
-                    }
-                };
-
-                var userRoles = new List<UserRole>
-                {
-                    new UserRole
-                    {
-                        Id = Guid.NewGuid(),
-                        UserId = user.Id,
-                        RoleId = role.RoleId,
-                        ValidFrom = now,
-                        ValidTo = null,
-                        AssignedBy = user.Id 
-                    }
-                };
+                    var userRoles = new List<UserRole>
+                        {
+                            new UserRole
+                            {
+                                Id = Guid.NewGuid(),
+                                UserId = user.Id,
+                                RoleId = role.Id,
+                                ValidFrom = now,
+                                ValidTo = null,
+                                AssignedBy = user.Id 
+                            }
+                        };
 
                 await _repo.AssignRolesToUserAsync(user.Id, userRoles, ct);
                 }
@@ -142,6 +138,7 @@ public sealed class AuthServices : IAuthServices
             var combinedPasswordHistory = $"{salt}:{hash}";
             var passwordHistory = new PasswordHistory
             {
+                Id = Guid.NewGuid(),
                 UserId = user.Id,
                 PasswordHash = combinedPasswordHistory,
                 ChangedAtUtc = now,
@@ -227,7 +224,7 @@ public sealed class AuthServices : IAuthServices
             if (!is2FaValid)
             {
                 var inputHash = _hasher.HashToken(cleanCode);
-                matchedRecoveryToken = await _repo.GetActiveTokenByHashAsync(user.Id, inputHash, tokenTypeId: 4, now, ct);
+                matchedRecoveryToken = await _repo.GetActiveTokenByHashAsync(user.Id, inputHash, tokenTypeId: (byte)TokenType.TwoFactorAuth, now, ct);
                 
                 if (matchedRecoveryToken is not null)
                 {
@@ -314,10 +311,7 @@ public sealed class AuthServices : IAuthServices
             Roles = roles,
             AuthResponseDto = userAuth,
         };
-
-
         return ApiResponse<UserResponseDto>.Success(userProfile, "Authentication successful.");
-
     }
 
    public async Task<ApiResponse<TwoFactorRegistrationResponseDto>> InitiateEnableTwoFactorAsync(Guid userId, CancellationToken ct = default)
@@ -356,11 +350,12 @@ public sealed class AuthServices : IAuthServices
 
             await _repo.SaveUserTokenAsync(new UserToken
             {
+                Id = Guid.NewGuid(),
                 UserId = user.Id,
                 TokenType = TokenType.TwoFactorAuth, 
                 TokenHash = hashedToken,
                 ExpiresAt = _date.UtcNow.AddYears(10), 
-                IsUsed = false
+                IsUsed = false,
             }, ct);
         }
 
@@ -464,7 +459,7 @@ public sealed class AuthServices : IAuthServices
         
         var inputHash = _hasher.HashToken(recoveryCode.Trim().ToUpperInvariant());
 
-        var userToken = await _repo.GetActiveTokenByHashAsync(userId, inputHash, tokenTypeId: 4, now, ct);
+        var userToken = await _repo.GetActiveTokenByHashAsync(userId, inputHash, tokenTypeId: (byte)TokenType.TwoFactorAuth, now, ct);
 
         if (userToken is null)
         {
@@ -490,7 +485,7 @@ public sealed class AuthServices : IAuthServices
             
             await _repo.RevokeAllUserSessionsAsync(userId, now, ct);
             
-            await _repo.InvalidateAllUser2FaTokensAsync(userId, now, ct);
+            await _repo.InvalidateAllUserTokensByTypeAsync(userId, (byte)TokenType.TwoFactorAuth, now, ct);
         }, ct);
 
         _logger.LogWarning("User {UserId} successfully bypassed 2FA using a valid recovery code. Two-factor authentication has been deactivated.", userId);
@@ -519,7 +514,7 @@ public sealed class AuthServices : IAuthServices
             user.TwoFactorSecret = null; 
             await _repo.UpdateUserAsync(user, ct);
             
-            await _repo.InvalidateAllUser2FaTokensAsync(userId, now, ct);
+            await _repo.InvalidateAllUserTokensByTypeAsync(userId, (byte)TokenType.TwoFactorAuth, now, ct);
             
             await _repo.RevokeAllUserSessionsAsync(userId, now, ct);
         }, ct);
@@ -535,10 +530,11 @@ public sealed class AuthServices : IAuthServices
         if (user is null) return ApiResponse<bool>.Failure("User not found.", AuthErrors.UserNotFound);
         if (user.EmailVerified) return ApiResponse<bool>.Success(true, "Email is already verified.");
 
-        var code = new Random().Next(100000, 999999).ToString();
+        var code = System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         var expiry = _date.UtcNow.AddMinutes(15); 
         var tokenHash = _hasher.HashToken(code);
 
+        await _repo.InvalidateAllUserTokensByTypeAsync(userId, (byte)TokenType.EmailVerification, _date.UtcNow, ct);
         await _repo.SaveUserTokenAsync(new UserToken
         {
             UserId = user.Id,
@@ -565,7 +561,7 @@ public sealed class AuthServices : IAuthServices
         var now = _date.UtcNow;
         var inputHash = _hasher.HashToken(code.Trim());
 
-        var userToken = await _repo.GetActiveTokenByHashAsync(userId, inputHash, tokenTypeId: 1, now, ct);
+        var userToken = await _repo.GetActiveTokenByHashAsync(userId, inputHash, tokenTypeId: (byte)TokenType.EmailVerification, now, ct);
 
         if (userToken is null)
         {
@@ -595,9 +591,11 @@ public sealed class AuthServices : IAuthServices
         if (string.IsNullOrWhiteSpace(user.PhoneNumber)) return ApiResponse<bool>.Failure("No phone number is registered for this account.");
         if (user.PhoneVerified) return ApiResponse<bool>.Success(true, "Phone number is already verified.");
 
-        var code = new Random().Next(100000, 999999).ToString();
+        var code = System.Security.Cryptography.RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         var expiry = _date.UtcNow.AddMinutes(10);
         var tokenHash = _hasher.HashToken(code);
+
+        await _repo.InvalidateAllUserTokensByTypeAsync(userId, (byte)TokenType.PhoneVerification, _date.UtcNow, ct);
 
         await _repo.SaveUserTokenAsync(new UserToken
         {
@@ -624,7 +622,7 @@ public sealed class AuthServices : IAuthServices
         var now = _date.UtcNow;
         var inputHash = _hasher.HashToken(code.Trim());
 
-        var userToken = await _repo.GetActiveTokenByHashAsync(userId, inputHash, tokenTypeId: 2, now, ct);
+        var userToken = await _repo.GetActiveTokenByHashAsync(userId, inputHash, tokenTypeId: (byte)TokenType.PhoneVerification, now, ct);
 
         if (userToken is null)
         {
@@ -729,7 +727,6 @@ public sealed class AuthServices : IAuthServices
         return ApiResponse<bool>.Success(true, "Session revoked successfully.");
     }
 
-
     public async Task<ApiResponse<bool>> RevokeAllUserSessionsAsync(Guid userId, CancellationToken ct = default)
     {
         var user = await _repo.GetUserByIdAsync(userId, ct);
@@ -762,8 +759,7 @@ public sealed class AuthServices : IAuthServices
         return ApiResponse<IEnumerable<UserSessionResponseDto>>.Success(activeSessions, "Active sessions retrieved successfully.");
     }
 
-    public async Task<ApiResponse<bool>> ChangePasswordAsync(
-    Guid userId, ChangePasswordRequestDto requestDto, CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> ChangePasswordAsync(Guid userId, ChangePasswordRequestDto requestDto, CancellationToken ct = default)
     {
         var validation = await _changePasswordValidator.ValidateAsync(requestDto, ct);
         if (!validation.IsValid)
@@ -804,6 +800,7 @@ public sealed class AuthServices : IAuthServices
 
             var passwordHistory = new PasswordHistory
             {
+                Id = Guid.NewGuid(),
                 UserId = userId,
                 PasswordHash = combinedPasswordHistory,
                 ChangedAtUtc = now,

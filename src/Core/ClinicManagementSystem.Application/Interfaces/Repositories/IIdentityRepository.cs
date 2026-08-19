@@ -11,6 +11,9 @@ namespace ClinicManagementSystem.Application.Interfaces.Repositories;
 
 public interface IIdentityRepository
 {
+    // ════════════════════════════════════════════════════════════════════════
+    //  USERS MANAGEMENT
+    // ════════════════════════════════════════════════════════════════════════
 
     Task<ApplicationUser?> GetUserByIdAsync(Guid userId, CancellationToken ct = default);
     Task<ApplicationUser?> GetUserByEmailOrUsernameAsync(string identifier, CancellationToken ct = default);
@@ -24,16 +27,28 @@ public interface IIdentityRepository
     Task UpdatePasswordAsync(Guid userId, string passwordHash, string passwordSalt, DateTimeOffset changedAt, CancellationToken ct = default);
     Task TrackPasswordHistoryAsync(PasswordHistory history, CancellationToken ct = default);
     Task<List<string>> GetRecentPasswordHashesAsync(Guid userId, int takeLast = 5, CancellationToken ct = default);
+    Task<(IReadOnlyList<ApplicationUser> Users, Dictionary<Guid, List<string>> UserRoles, int TotalCount)> GetPagedUsersAsync(UserQueryParams queryParams, CancellationToken ct = default);
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  ROLES MANAGEMENT
+    // ════════════════════════════════════════════════════════════════════════
 
     Task<IReadOnlyList<Role>> GetAllRolesAsync(CancellationToken ct = default);
-    Task<(IReadOnlyList<ApplicationUser> Users, Dictionary<Guid, List<string>> UserRoles, int TotalCount)> GetPagedUsersAsync(UserQueryParams queryParams, CancellationToken ct = default);
     Task<Role?> GetRoleByIdAsync(Guid roleId, CancellationToken ct = default);
+    Task<Role?> GetRoleByNameAsync(string roleName, CancellationToken ct = default);
+    Task<IReadOnlyList<Role>> GetRolesByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken ct = default);
     Task<bool> RoleExistsByNameAsync(string normalizedName, CancellationToken ct = default);
     Task<bool> RoleExistsByIdAsync(Guid roleId, CancellationToken ct = default);
     Task CreateRoleAsync(Role request, CancellationToken ct = default);
     Task UpdateRoleAsync(Role request, CancellationToken ct = default);
     Task<int> GetAssignedUserCountForRoleAsync(Guid roleId, CancellationToken ct = default);
     Task DeleteRoleAsync(Guid roleId, CancellationToken ct = default);
+    Task<(List<Role> Roles, int TotalCount)> SearchRolesAsync(RoleSearchFilter filter, CancellationToken ct = default);
+    Task<List<Role>> GetSystemRolesAsync(CancellationToken ct = default);
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  PERMISSIONS MANAGEMENT
+    // ════════════════════════════════════════════════════════════════════════
 
     Task<IReadOnlyList<Permission>> GetAllPermissionsAsync(CancellationToken ct = default);
     Task<Permission?> GetPermissionByIdAsync(Guid permissionId, CancellationToken ct = default);
@@ -41,8 +56,13 @@ public interface IIdentityRepository
     Task<bool> PermissionExistsByCodeAsync(string permissionCode, CancellationToken ct = default);
     Task CreatePermissionAsync(Permission request, CancellationToken ct = default);
     Task UpdatePermissionAsync(Permission request, CancellationToken ct = default);
-    Task DeletePermissionAsync(Guid permissionId, CancellationToken ct = default);
+    Task DeletePermissionAsync(Guid permissionId, Guid? userId, CancellationToken ct = default);
     Task<int> GetAssignedRoleCountForPermissionAsync(Guid permissionId, CancellationToken ct = default);
+    Task<(List<Permission> Permissions, int TotalCount)> SearchPermissionsAsync(PermissionSearchFilter filter, CancellationToken ct = default);
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  ROLE PERMISSIONS MANAGEMENT
+    // ════════════════════════════════════════════════════════════════════════
 
     Task<IReadOnlyList<Permission>> GetPermissionsByRoleIdAsync(Guid roleId, CancellationToken ct = default);
     Task<IReadOnlyList<Permission>> GetPermissionsByIdsAsync(IEnumerable<Guid> permissionIds, CancellationToken ct = default);
@@ -52,16 +72,24 @@ public interface IIdentityRepository
     Task RemovePermissionFromRoleAsync(Guid roleId, Guid permissionId, CancellationToken ct = default);
     Task RemoveAllPermissionsFromRoleAsync(Guid roleId, CancellationToken ct = default);
     Task AssignPermissionsToRoleAsync(Guid roleId, IEnumerable<RolePermission> rolePermissions, CancellationToken ct = default);
+    Task<bool> AnyRoleHasPermissionByCodeAsync(IEnumerable<Guid> roleIds, string permissionCode, CancellationToken ct = default);
 
-    Task<IReadOnlyList<RoleResponseDto>> GetRolesByIdsAsync(IEnumerable<Guid> roleIds, CancellationToken ct = default);
-    Task<RoleResponseDto?> GetRoleByNameAsync(string roleName, CancellationToken ct = default);
-    Task<IReadOnlyList<UserRoleResponseDto>> GetRolesByUserIdAsync(Guid userId, CancellationToken ct = default);
+    // ════════════════════════════════════════════════════════════════════════
+    //  USER ROLES MANAGEMENT
+    // ════════════════════════════════════════════════════════════════════════
+
+    Task<IReadOnlyList<UserRole>> GetRolesByUserIdAsync(Guid userId, CancellationToken ct = default);
     Task<bool> UserHasRoleAsync(Guid userId, Guid roleId, CancellationToken ct = default);
     Task<bool> UserHasActiveRoleByCodeAsync(Guid userId, string roleCode, CancellationToken ct = default);
     Task AddUserRoleAsync(UserRole userRole, CancellationToken ct = default);
     Task RemoveUserRoleAsync(Guid userId, Guid roleId, CancellationToken ct = default);
     Task RemoveAllRolesFromUserAsync(Guid userId, CancellationToken ct = default);
-    Task AssignRolesToUserAsync(Guid userId, IEnumerable<UserRole> userRoles, CancellationToken ct = default); 
+    Task AssignRolesToUserAsync(Guid userId, IEnumerable<UserRole> userRoles, CancellationToken ct = default);
+    Task<List<string>> GetUserRolesAsync(Guid userId, CancellationToken ct = default);
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  USER PERMISSION OVERRIDES MANAGEMENT
+    // ════════════════════════════════════════════════════════════════════════
 
     Task<UserPermissionResponseDto?> GetUserPermissionOverrideByIdAsync(Guid userPermissionId, CancellationToken ct = default);
     Task<IReadOnlyList<UserPermissionResponseDto>> GetUserPermissionOverridesAsync(Guid userId, CancellationToken ct = default);
@@ -71,17 +99,24 @@ public interface IIdentityRepository
     Task DeleteUserPermissionOverrideAsync(Guid userPermissionId, CancellationToken ct = default);
     Task RemoveAllPermissionOverridesFromUserAsync(Guid userId, CancellationToken ct = default);
     Task AddUserPermissionOverridesBulkAsync(Guid userId, IEnumerable<UserPermission> overrides, CancellationToken ct = default);
-    Task<bool> AnyRoleHasPermissionByCodeAsync(IEnumerable<Guid> roleIds, string permissionCode, CancellationToken ct = default);
     Task<bool> HasActiveDenyOverrideAsync(Guid userId, string permissionCode, CancellationToken ct = default);
     Task<bool> HasActiveGrantOverrideAsync(Guid userId, string permissionCode, CancellationToken ct = default);
-    Task<List<string>> GetUserRolesAsync(Guid userId, CancellationToken ct = default);
     Task<List<string>> GetUserPermissionsAsync(Guid userId, CancellationToken ct = default);
+    Task<List<string>> GetEffectivePermissionsByUserIdAsync(Guid userId, CancellationToken ct = default);
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  SESSIONS MANAGEMENT
+    // ════════════════════════════════════════════════════════════════════════
 
     Task CreateSessionAsync(UserSession session, CancellationToken ct = default);
     Task<UserSession?> GetSessionByRefreshTokenAsync(string refreshToken, CancellationToken ct = default);
     Task RevokeSessionAsync(Guid sessionId, string? replacedByToken, DateTimeOffset revokedAt, CancellationToken ct = default);
     Task RevokeAllUserSessionsAsync(Guid userId, DateTimeOffset revokedAt, CancellationToken ct = default);
     Task<IReadOnlyList<UserSessionResponseDto>> GetActiveSessionsByUserIdAsync(Guid userId, CancellationToken ct = default);
+
+    // ════════════════════════════════════════════════════════════════════════
+    //  TOKENS & SECURITY MANAGEMENT
+    // ════════════════════════════════════════════════════════════════════════
 
     Task SaveEmailOtpAsync(Guid userId, string otpCode, DateTimeOffset expiresAt, CancellationToken ct = default);
     Task<bool> ValidateAndConsumeEmailOtpAsync(Guid userId, string otpCode, DateTimeOffset currentTime, CancellationToken ct = default);
@@ -91,13 +126,8 @@ public interface IIdentityRepository
     Task SaveUserTokenAsync(UserToken userToken, CancellationToken ct = default);
     Task<Guid?> GetUserIdByValidTokenAsync(string token, TokenType tokenType, CancellationToken ct = default);
     Task MarkTokenAsUsedAsync(string token, CancellationToken ct = default);
-
-
-
     Task<UserToken?> GetActiveTokenByHashAsync(Guid userId, string tokenHash, byte tokenTypeId, DateTimeOffset now, CancellationToken ct = default);
     Task UpdateUserTokenAsync(UserToken userToken, CancellationToken ct = default);
     Task InvalidateAllUser2FaTokensAsync(Guid userId, DateTimeOffset now, CancellationToken ct = default);
-    Task<(List<Role> Roles, int TotalCount)> SearchRolesAsync(RoleSearchFilter filter, CancellationToken ct = default);
-    Task<List<Role>> GetSystemRolesAsync(CancellationToken ct = default);
-    Task<(List<Permission> Permissions, int TotalCount)> SearchPermissionsAsync(PermissionSearchFilter filter, CancellationToken ct = default);
+    Task InvalidateAllUserTokensByTypeAsync(Guid userId, byte tokenTypeId, DateTimeOffset now, CancellationToken ct = default);
 }

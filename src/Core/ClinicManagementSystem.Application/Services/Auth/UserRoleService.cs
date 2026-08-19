@@ -1,6 +1,7 @@
 ﻿using ClinicManagementSystem.Application.Common.Errors;
 using ClinicManagementSystem.Application.Common.Interfaces;
 using ClinicManagementSystem.Application.Common.Models;
+using ClinicManagementSystem.Application.DTOs.Auth.Role;
 using ClinicManagementSystem.Application.DTOs.Auth.UserRole;
 using ClinicManagementSystem.Application.Interfaces.Repositories;
 using ClinicManagementSystem.Application.Interfaces.Services.Auth;
@@ -52,14 +53,27 @@ public sealed class UserRoleService : IUserRoleService
                 UserErrors.UserNotFound);   
         }
 
-        var roles = await _repo.GetRolesByUserIdAsync(userId, ct);
+        var userRoles = await _repo.GetRolesByUserIdAsync(userId, ct);
+        var now = _date.UtcNow;
 
         var response = new UserRolesDetailsResponseDto
         {
             UserId = user.Id,
             Username = user.Username,
             Email = user.Email,
-            AssignedRoles = roles
+            AssignedRoles = userRoles.Select(ur => new UserRoleResponseDto
+            {
+                UserRoleId = ur.Id,
+                UserId = ur.UserId,
+                RoleId = ur.RoleId,
+                RoleName = string.Empty, 
+                RoleCode = string.Empty, 
+                ValidFrom = ur.ValidFrom,
+                ValidTo = ur.ValidTo,
+                IsActive = ur.IsActive(now), 
+                AssignedBy = ur.AssignedBy,
+                CreatedAt = ur.CreatedAt
+            }).ToList()
         };
 
         return ApiResponse<UserRolesDetailsResponseDto>.Success(response, "User roles retrieved successfully.");
@@ -210,8 +224,8 @@ public sealed class UserRoleService : IUserRoleService
         if (userId == Guid.Empty)
         {
             return ApiResponse<bool>.Failure(
-                "Invalid role code format.",
-                RoleErrors.InvalidRoleCode);
+            "Invalid user identifier.",
+            UserErrors.InvalidUserId);
         }
 
         if (string.IsNullOrWhiteSpace(roleCode))

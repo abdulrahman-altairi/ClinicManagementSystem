@@ -95,12 +95,7 @@ public sealed class UserManagementService : IUserManagementService
         return ApiResponse<IEnumerable<UserResponseDto>>.Success(result.Data!.Items, "Search results completed.");
     }
 
-    public async Task<ApiResponse<bool>> UpdateProfileAsync(
-        Guid userId, 
-        UpdateUserProfileRequestDto requestDto, 
-        Stream? avatarStream = null, 
-        string? avatarFileName = null, 
-        CancellationToken ct = default)
+    public async Task<ApiResponse<bool>> UpdateProfileAsync(Guid userId, UpdateUserProfileRequestDto requestDto, Stream? avatarStream = null, string? avatarFileName = null, CancellationToken ct = default)
     {
         var user = await _repo.GetUserByIdAsync(userId, ct);
         if (user is null)
@@ -153,7 +148,6 @@ public sealed class UserManagementService : IUserManagementService
         if (newAvatarUrl is not null) user.AvatarUrl = newAvatarUrl;
 
         user.UpdatedAt = _date.UtcNow;
-        user.CreatedBy = _currentUser.UserId;
 
         await _repo.UpdateUserAsync(user, ct);
         _logger.LogInformation("Profile updated successfully for user {UserId}.", userId);
@@ -174,7 +168,14 @@ public sealed class UserManagementService : IUserManagementService
             return ApiResponse<bool>.Success(true, "User does not have a custom avatar assigned.");
         }
 
-        await _fileStorage.DeleteFileAsync(user.AvatarUrl, ct);
+        try
+        {
+            await _fileStorage.DeleteFileAsync(user.AvatarUrl, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete physical avatar file for user {UserId}.", userId);
+        }
 
         user.AvatarUrl = null; 
         user.UpdatedAt = _date.UtcNow;
@@ -220,7 +221,7 @@ public sealed class UserManagementService : IUserManagementService
                         {
                             Id = Guid.NewGuid(),
                             UserId = user.Id,
-                            RoleId = role.RoleId,
+                            RoleId = role.Id,
                             ValidFrom = now,
                             ValidTo = null,
                             AssignedBy = _currentUser.UserId
@@ -288,7 +289,6 @@ public sealed class UserManagementService : IUserManagementService
 
         return ApiResponse<bool>.Success(true, "User account has been unlocked successfully. The user can now log in.");
     }
-
 
     private static UserResponseDto MapToUserResponseDto(ApplicationUser user, List<string> roles)
     {

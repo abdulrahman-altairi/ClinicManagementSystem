@@ -20,6 +20,10 @@ public static class AuthErrors
     public static readonly ErrorModel UsernameAlreadyTaken = ErrorModel.Global(
         "The specified username is already in use.",
         ErrorCode.UsernameAlreadyTaken.ToString());
+        
+    public static readonly ErrorModel PhoneNumber = ErrorModel.Global(
+        "The specified phonenumber is already in use.",
+        ErrorCode.UsernameAlreadyTaken.ToString());
 
     // ── Authentication Errors ───────────────────────────────────────────────────
 

@@ -11,4 +11,5 @@ public interface IUserPermissionService
     Task<ApiResponse<bool>> DeleteUserPermissionOverrideAsync(Guid userPermissionId, CancellationToken ct = default);
     Task<ApiResponse<bool>> SetUserPermissionsBulkAsync(SetUserPermissionsBulkRequestDto requestDto, CancellationToken ct = default);
     Task<ApiResponse<bool>> EvaluateUserPermissionAsync(Guid userId, string permissionCode, CancellationToken ct = default);
+    Task<ApiResponse<List<string>>> GetEffectivePermissionsForUserAsync(Guid userId, CancellationToken ct = default);
 }

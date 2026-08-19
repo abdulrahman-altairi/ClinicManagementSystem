@@ -3,7 +3,7 @@ using ClinicManagementSystem.Domain.Entities.Auth;
 
 namespace ClinicManagementSystem.Infrastructure.Persistence.DataMappers;
 
-public static class RoleMapper
+public static class RoleDataMapperExtensions
 {
 
     public readonly struct RoleOrdinals
@@ -37,7 +37,7 @@ public static class RoleMapper
     }
 
 
-    public static Role MapToEntity(SqlDataReader reader)
+    public static Role MapToRole(SqlDataReader reader)
     {
         return new Role
         {
@@ -61,7 +61,7 @@ public static class RoleMapper
         };
     }
 
-    public static Role MapToEntity(SqlDataReader reader, RoleOrdinals ordinals)
+    public static Role MapToRole(SqlDataReader reader, RoleOrdinals ordinals)
     {
         return new Role
         {
